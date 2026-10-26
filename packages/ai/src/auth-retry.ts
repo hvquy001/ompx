@@ -301,19 +301,7 @@ export async function withAuth<T>(
 
 	const resolver = key;
 	const signal = opts?.signal;
-	let initialKey: string | undefined;
-	try {
-		initialKey = await resolveApiKeyOnce(resolver, signal);
-	} catch (error) {
-		// A resolver that deliberately reports a missing key keeps that type.
-		if (error instanceof AIError.MissingApiKeyError) throw error;
-		// A thrown resolver is a broker/OAuth/network failure, not a missing
-		// key — surface the cause instead of masking it as "No API key".
-		throw new AIError.ConfigurationError(
-			`Failed to resolve API key: ${error instanceof Error ? error.message : String(error)}`,
-			{ cause: error },
-		);
-	}
+	const initialKey = await resolveApiKeyOnce(resolver, signal);
 	if (initialKey === undefined) throw missingKey();
 
 	const state = createAuthRetryKeyState(initialKey);
