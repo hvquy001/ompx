@@ -92,6 +92,10 @@ function sessionWithJobs(
 			await waitForIdle();
 		},
 		getLastAssistantMessage: () => last,
+		// Print mode reads the final turn's assistant messages from the active context.
+		get state() {
+			return { messages: last ? [last] : [] };
+		},
 		dispose: async () => {
 			retryCancelled.resolve();
 			events.push(`dispose(pending=${pending})`);

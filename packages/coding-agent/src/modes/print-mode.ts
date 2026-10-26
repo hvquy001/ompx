@@ -12,6 +12,7 @@ import { $flag, logger, postmortem, sanitizeText } from "@oh-my-pi/pi-utils";
 import type { MCPManager } from "../mcp/manager";
 import { resolveMCPTimeoutMs } from "../mcp/timeout";
 import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
+import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import { CREDENTIAL_DISABLED_NOTICE_SOURCE } from "../session/credential-disabled-notice";
 import { isSilentAbort } from "../session/messages";
 import { flushTelemetryExport } from "../telemetry-export";
@@ -624,13 +625,18 @@ async function runPrintModeCore(
 
 /**
  * Assistant messages of the turn that produced `last`: everything after the
- * most recent user message, ending with `last` itself (which may already be
- * pruned from the active context, e.g. a classifier refusal).
+ * message that started the turn, ending with `last` itself (which may already be
+ * pruned from the active context, e.g. a classifier refusal). A turn starts at a
+ * user prompt or at the async-result message an `async.printWake` wake delivers,
+ * so a woken turn prints only its own answer, not the turn that started the job.
  */
 function turnAssistantMessages(messages: readonly AgentMessage[], last: AssistantMessage): AssistantMessage[] {
-	const lastUser = messages.findLastIndex(message => message.role === "user");
+	const turnStart = messages.findLastIndex(
+		message =>
+			message.role === "user" || (message.role === "custom" && message.customType === ASYNC_RESULT_MESSAGE_TYPE),
+	);
 	const turn = messages
-		.slice(lastUser + 1)
+		.slice(turnStart + 1)
 		.filter((message): message is AssistantMessage => message.role === "assistant" && message !== last);
 	return [...turn, last];
 }

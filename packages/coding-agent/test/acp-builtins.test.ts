@@ -537,7 +537,7 @@ describe("ACP builtin slash commands", () => {
 		expect(cfgCavemanEnabled.get(runtime.settings)).toBe(true);
 		expect(output.at(-1)).toBe(turnedOn);
 
-		expect(await executeAcpBuiltinSlashCommand("/caveman nope", runtime)).toEqual({ consumed: true });
+		expect(await executeAcpBuiltinSlashCommand("/caveman nope", runtime)).toEqual({ consumed: true, failed: true });
 		expect(output.at(-1)).toBe("Usage: /caveman [on|off|status]");
 		expect(cfgCavemanEnabled.get(Settings.isolated())).toBe(true);
 	});
@@ -564,7 +564,7 @@ describe("ACP builtin slash commands", () => {
 		expect(cfgPonytailEnabled.get(runtime.settings)).toBe(true);
 		expect(output.at(-1)).toBe("Ponytail mode is on: skill loaded for this session and implementer subagents.");
 
-		expect(await executeAcpBuiltinSlashCommand("/ponytail nope", runtime)).toEqual({ consumed: true });
+		expect(await executeAcpBuiltinSlashCommand("/ponytail nope", runtime)).toEqual({ consumed: true, failed: true });
 		expect(output.at(-1)).toBe("Usage: /ponytail [on|off|status]");
 		expect(cfgPonytailEnabled.get(Settings.isolated())).toBe(true);
 	});
@@ -2140,7 +2140,7 @@ describe("wave 5 — adapters and polish", () => {
 		await withContextGcFixture(async ({ output, runtime }) => {
 			const result = await executeAcpBuiltinSlashCommand("/context-gc tree --wat", runtime);
 
-			expect(result).toEqual({ consumed: true });
+			expect(result).toEqual({ consumed: true, failed: true });
 			expect(output[0]).toContain("Usage: /context-gc");
 		});
 	});

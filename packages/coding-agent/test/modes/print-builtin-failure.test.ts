@@ -151,6 +151,7 @@ describe("print mode builtin exit codes", () => {
 			},
 			retry: async () => true,
 			getLastAssistantMessage: () => retriedAnswer,
+			state: { messages: [retriedAnswer] },
 			dispose: async () => {},
 		} as unknown as AgentSession;
 
