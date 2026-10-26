@@ -94,6 +94,10 @@ export const launchHelp = {
 		duo: Flags.boolean({
 			description: "Start in duo mode (planner/executor auto model switch with advisor takeover) for this session",
 		}),
+		"wait-async": Flags.boolean({
+			description:
+				"Print mode: before exiting, wait for this run's background jobs and wake the session with each result (async.printWake); no time limit unless --max-time is set",
+		}),
 		"external-thinking": Flags.boolean({
 			description:
 				"Use a private scratchpad while disabling supported GPT, Claude, and Gemini reasoning (at your own risk: providers have flagged this request shape as abuse)",

@@ -53,6 +53,8 @@ export interface Args {
 	hideThinking?: boolean;
 	advisor?: boolean;
 	duo?: boolean;
+	/** Print mode: wake the session with background-job results before exiting (`async.printWake`). */
+	waitAsync?: boolean;
 	externalThinking?: boolean;
 	continue?: boolean;
 	resume?: string | true;
@@ -376,6 +378,8 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.advisor = true;
 		} else if (arg === "--duo") {
 			result.duo = true;
+		} else if (arg === "--wait-async") {
+			result.waitAsync = true;
 		} else if (arg === "--external-thinking") {
 			result.externalThinking = true;
 		} else if (arg === "--prewalk") {

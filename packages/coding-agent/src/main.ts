@@ -76,7 +76,10 @@ import { formatExtensionLoadNotifications } from "./extensibility/extensions/loa
 import { loadExtensions } from "./extensibility/extensions/loader";
 import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
-import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
+import {
+	scheduleMarketplaceAutoUpdate,
+	type MarketplaceAutoUpdateOptions,
+} from "./extensibility/plugins/marketplace-auto-update";
 import { registerDaemonProjectPresence } from "./launch/presence";
 import type { MCPManager } from "./mcp";
 import { refreshActiveUsagePanelForSession } from "./modes/controllers/command-controller";
@@ -158,7 +161,7 @@ import { cfgGoalEnabled } from "./goals/settings";
 import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "./plan-mode/settings";
 
 import { cfgAdvisorEnabled } from "./advisor/settings";
-import { cfgToolsApprovalMode } from "./tools/settings";
+import { cfgAsyncPrintWake, cfgToolsApprovalMode } from "./tools/settings";
 import {
 	cfgAutocompleteMaxVisible,
 	cfgAutoResume,
@@ -2115,6 +2118,10 @@ export async function runRootCommand(
 		if (parsedArgs.duo) {
 			cfgDuoMode.override(settingsInstance, "on");
 		}
+		// Apply --wait-async CLI flag (ephemeral, not persisted); only print mode reads it
+		if (parsedArgs.waitAsync) {
+			cfgAsyncPrintWake.override(settingsInstance, true);
+		}
 		// Apply --external-thinking CLI flag (ephemeral, not persisted)
 		if (parsedArgs.externalThinking) {
 			cfgExternalThinking.override(settingsInstance, true);
@@ -2373,12 +2380,6 @@ export async function runRootCommand(
 				: undefined;
 		daemonPresencePromise?.catch(() => {});
 
-		scheduleMarketplaceAutoUpdate({
-			autoUpdate: cfgMarketplaceAutoUpdate.get(settingsInstance),
-			resolveActiveProjectRegistryPath,
-			clearPluginRootsCache: clearPluginRootsAndCaches,
-		});
-
 		const sessionOptions = await logger.time(
 			"buildSessionOptions",
 			buildSessionOptions,
@@ -2388,6 +2389,11 @@ export async function runRootCommand(
 			modelRegistry,
 			settingsInstance,
 		);
+		const marketplaceAutoUpdateOptions: MarketplaceAutoUpdateOptions = {
+			autoUpdate: cfgMarketplaceAutoUpdate.get(settingsInstance),
+			resolveActiveProjectRegistryPath,
+			clearPluginRootsCache: clearPluginRootsAndCaches,
+		};
 		sessionOptions.authStorage = authStorage;
 		sessionOptions.modelRegistry = modelRegistry;
 		sessionOptions.hasUI = isInteractive || mode === "rpc-ui";
@@ -2471,6 +2477,7 @@ export async function runRootCommand(
 			});
 			// Branch-only protocol runner: keep ACP server code out of normal interactive startup.
 			const runAcpMode = deps.runAcpMode ?? (await import("./modes/acp/acp-mode")).runAcpMode;
+			scheduleMarketplaceAutoUpdate(marketplaceAutoUpdateOptions);
 			stopStartupWatchdog();
 			// Startup is over: stop recording spans, or every later session and subagent
 			// appends to the timing tree for the life of the server.
@@ -2490,9 +2497,20 @@ export async function runRootCommand(
 
 			const eventBus = new EventBus();
 			const subagentEventBus = new EventBus();
+			// Interactive launches bind startup-safe extensions after the composer accepts
+			// input; the first request waits for them instead. Kept eager when argv may
+			// carry extension flags (they must parse now), `--tools` must validate
+			// extension tools, or a restored transcript needs extension renderers.
+			const deferStartupSafeExtensions =
+				isInteractive &&
+				parsedArgs.unrecognizedFlags.length === 0 &&
+				!parsedArgs.tools?.length &&
+				!(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || parsedArgs.restore || foreignSource);
 			const extensionsResult = parsedArgs.trustedExtensions?.length
-				? await loadTrustedSessionExtensions(sessionOptions, cwd, eventBus)
-				: await loadSessionExtensions(sessionOptions, cwd, settingsInstance, eventBus);
+				? { ...(await loadTrustedSessionExtensions(sessionOptions, cwd, eventBus)), deferredPaths: [] }
+				: await loadSessionExtensions(sessionOptions, cwd, settingsInstance, eventBus, {
+						deferStartupSafe: deferStartupSafeExtensions,
+					});
 			const extensionFlagSink: ExtensionFlagSink = {
 				getFlags: () => ExtensionRunner.aggregateFlags(extensionsResult.extensions),
 				setFlagValue: (name, value) => {
@@ -2616,6 +2634,7 @@ export async function runRootCommand(
 				eventBus,
 				subagentEventBus,
 				preloadedExtensions: extensionsResult,
+				deferredExtensionPaths: extensionsResult.deferredPaths,
 				// Validated once the background refresh is in flight, so selectors it
 				// may still supply defer instead of warning; interactive mode also
 				// waits for the first frame (`startDeferredStartupWork`).
@@ -2636,6 +2655,7 @@ export async function runRootCommand(
 				}
 				throw error;
 			}
+			scheduleMarketplaceAutoUpdate(marketplaceAutoUpdateOptions);
 
 			// Cold-revive support: a `parked` subagent ref restored from disk (Agent Hub
 			// scan, collab mirror, resumed process) has a sessionFile but no in-memory
@@ -2687,6 +2707,7 @@ export async function runRootCommand(
 			// prompt: fallback-chain validation only produces header warnings, and the
 			// background refresh already raced the first prompt when it ran earlier.
 			const startDeferredStartupWork = (): void => {
+				void session.loadDeferredExtensions();
 				modelRegistry.refreshInBackground();
 				session.validateRetryFallbackChains();
 				if (configuredScope.length > 0) {
@@ -2765,6 +2786,7 @@ export async function runRootCommand(
 					setToolUIContext: mode === "rpc-ui" ? setToolUIContext : undefined,
 					headless: parsedArgs.noUi === true,
 					subagentEventBus,
+					mcpManager,
 					input: rpcInput,
 				});
 			} else if (isInteractive) {
@@ -2841,6 +2863,7 @@ export async function runRootCommand(
 					printThoughts: initialArgs.printThoughts,
 					planYolo: parsedArgs.planYolo,
 					mcpManager,
+					deadline: sessionOptions.deadline,
 				});
 				if ($env.PI_TIMING) {
 					logger.printTimings();

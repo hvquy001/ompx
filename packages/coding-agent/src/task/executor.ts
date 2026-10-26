@@ -373,11 +373,7 @@ function resolveSubagentInheritedRetryFallbackChain(
 		configuredChains?.[keys.agentName] ??
 		(keys.role !== undefined ? configuredChains?.[keys.role] : undefined) ??
 		configuredChains?.default;
-	if (
-		!Array.isArray(fallbackChain) ||
-		fallbackChain.length === 0 ||
-		!fallbackChain.every(entry => typeof entry === "string")
-	) {
+	if (!Array.isArray(fallbackChain) || !fallbackChain.every(entry => typeof entry === "string")) {
 		return undefined;
 	}
 	const disabledProviders = new Set(cfgDisabledProviders.get(settings));
@@ -408,11 +404,7 @@ function installSubagentRetryFallbackChain(args: {
 	// would put the entries that already failed the dispatch-time auth check back in front.
 	const fallbackChain =
 		fallbackSelectors.length > 0 ? fallbackSelectors : selectedIndex === 0 ? inheritedFallbackChain : undefined;
-	if (
-		!Array.isArray(fallbackChain) ||
-		fallbackChain.length === 0 ||
-		!fallbackChain.every(entry => typeof entry === "string")
-	) {
+	if (!Array.isArray(fallbackChain) || !fallbackChain.every(entry => typeof entry === "string")) {
 		return undefined;
 	}
 

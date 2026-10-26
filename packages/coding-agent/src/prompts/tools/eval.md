@@ -13,8 +13,8 @@ read(path, offset?=1, limit?=None) → str
 write(path, content) → str
 env(key?=None, value?=None) → str | None | dict
 output(*ids, format?="raw", query?=None, offset?=None, limit?=None) → str | dict | list[dict]
-{{#if js}}await {{/if}}tool.<name>(args) → unknown
-    Invoke any session tool; `args` = its parameter object.{{#if py}} Async: `await tool.read({...})`.{{/if}}
+await tool.<name>(args) → unknown
+    Invoke any session tool; `args` = its parameter object.
 wait(handles, timeout?=None, raise_errors?=True) — agent/completion barrier, ordered results{{#if js}}; JS: wait(handles, { timeout, raiseErrors }){{/if}}; `raise_errors=False` retains failures.
 ```
 </prelude>
