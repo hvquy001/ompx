@@ -14,6 +14,7 @@ import {
 	getProjectDir,
 	hasFsCode,
 	isEnoent,
+	isInteractiveHost,
 	logger,
 	parseFrontmatter,
 	prompt,
@@ -68,6 +69,7 @@ import {
 import { cfgTaskBatch, cfgTaskEager } from "./task/settings";
 import {
 	cfgAsyncEnabled,
+	cfgOutEnabled,
 	cfgToolsIntentTracing,
 	cfgToolsXdevDocs,
 	cfgToolsXdevInlineDevices,
@@ -90,6 +92,7 @@ export const cfgSystemPromptInputs = combine({
 	xdevDocs: cfgToolsXdevDocs,
 	xdevInlineDevices: cfgToolsXdevInlineDevices,
 	vaultEnabled: cfgVaultEnabled,
+	outEnabled: cfgOutEnabled,
 	renderMermaid: cfgTuiRenderMermaid,
 	renderSvg: cfgTuiRenderSvg,
 	autoGraph: cfgTuiAutoGraph,
@@ -391,6 +394,11 @@ export function dedupeContainedContextFiles(
 	);
 }
 
+/** Drop context files named `AGENTS.md` (any case). Task subagents never receive them. */
+export function withoutAgentsMd<T extends { path: string }>(files: T[]): T[] {
+	return files.filter(file => path.basename(file.path).toLowerCase() !== "agents.md");
+}
+
 async function loadProjectContextFilesForCwd(
 	cwd: string,
 	disabledExtensions?: string[],
@@ -597,6 +605,10 @@ export interface BuildSystemPromptOptions {
 	additionalWorkspaceRoots?: string[];
 	/** Pre-loaded context files (skips discovery if provided). */
 	contextFiles?: Array<{ path: string; content: string; depth?: number }>;
+	/** Load no context files beyond `contextFiles`: none for additional workspace roots, no nested AGENTS.md list. */
+	noContextFiles?: boolean;
+	/** Drop every context file named `AGENTS.md`, including ones discovered for additional workspace roots. */
+	excludeAgentsMd?: boolean;
 	/** Skills provided directly to system prompt construction. */
 	skills?: readonly Skill[];
 	/** Session-scoped description snapshot; background cache writes apply only to the next session. */
@@ -611,6 +623,8 @@ export interface BuildSystemPromptOptions {
 	mcpDiscoveryServerSummaries?: string[];
 	/** Compact discoverable built-in tool summaries advertised when native discovery hides them. */
 	nativeDiscoveryToolSummaries?: string[];
+	/** Guidance line explaining the intent field; `PI_INTENT_PROMPT` overrides it. Unset: the template's default. */
+	intentGuidance?: string;
 	/** Encourage the agent to delegate via tasks unless changes are trivial. */
 	eagerTasks?: boolean;
 	/** When true, the Eager Tasks section uses the hard MUST/ONLY wording (`task.eager: always`) rather than the softer `preferred` nudge. */
@@ -642,6 +656,8 @@ export interface BuildSystemPromptOptions {
 	securityEnabled?: boolean;
 	/** Whether the user approves `cfg://` writes for this session; gates advertising `cfg://`. */
 	settingsApproval?: boolean;
+	/** Whether `out://` writes reach the user as transcript replies; gates advertising `out://`. */
+	outReplies?: boolean;
 	/**
 	 * Eval preludes advertised by this prompt. Each prelude's `guidance` is
 	 * appended as its own block after the rendered template, so custom templates
@@ -767,6 +783,8 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		cwd,
 		additionalWorkspaceRoots = [],
 		contextFiles: providedContextFiles,
+		noContextFiles = false,
+		excludeAgentsMd = false,
 		skills: providedSkills,
 		rules,
 		alwaysApplyRules,
@@ -774,6 +792,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		mcpDiscoveryMode = false,
 		mcpDiscoveryServerSummaries = [],
 		nativeDiscoveryToolSummaries = [],
+		intentGuidance,
 		eagerTasks = false,
 		eagerTasksAlways = false,
 		taskBatch = true,
@@ -788,6 +807,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		memoryBackend,
 		securityEnabled = false,
 		settingsApproval = false,
+		outReplies = false,
 		evalPreludes = [],
 		model,
 		includeModelInPrompt = true,
@@ -837,7 +857,9 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		resolvedCustomPrompt: undefined as string | undefined,
 		resolvedAppendPrompt: undefined as string | undefined,
 		systemPromptCustomization: null as string | null,
-		contextFiles: dedupeContainedContextFiles(providedContextFiles ?? []),
+		contextFiles: dedupeContainedContextFiles(
+			excludeAgentsMd ? withoutAgentsMd(providedContextFiles ?? []) : (providedContextFiles ?? []),
+		),
 		skills: providedSkills ?? ([] as Skill[]),
 		workspaceTree: {
 			rootPath: resolvedCwd,
@@ -902,13 +924,14 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 					cwd: resolvedCwd,
 					workspaceRoots,
 				});
-		if (additionalRoots.length === 0) return primary;
+		if (additionalRoots.length === 0 || noContextFiles) return excludeAgentsMd ? withoutAgentsMd(primary) : primary;
 		const extra = await Promise.all(
 			additionalRoots.map(root => loadProjectContextFiles({ cwd: root }).catch(() => [])),
 		);
 		// Additional roots are context, but the active/tagged roots stay closest and
 		// win exact-path dedupe before contained-block dedupe removes redundant content.
-		return dedupeContainedContextFiles(dedupeExactContextFiles([...extra.flat(), ...primary]));
+		const merged = dedupeContainedContextFiles(dedupeExactContextFiles([...extra.flat(), ...primary]));
+		return excludeAgentsMd ? withoutAgentsMd(merged) : merged;
 	})();
 	const workspaceTreePromise = (async () => {
 		const primary =
@@ -989,7 +1012,9 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		withDeadline("loadPersonalityOverride", personalityPromise, bundledPersonality),
 	]);
 	clearTimeout(deadlineTimer);
-	const agentsMdFiles = Array.from(new Set(workspaceTree.agentsMdFiles)).sort().slice(0, AGENTS_MD_LIMIT);
+	const agentsMdFiles = noContextFiles
+		? []
+		: Array.from(new Set(workspaceTree.agentsMdFiles)).sort().slice(0, AGENTS_MD_LIMIT);
 
 	if (timedOut.length > 0) {
 		logger.warn("System prompt preparation steps timed out; using minimal fallback for those steps", {
@@ -997,9 +1022,13 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 			timeoutMs: SYSTEM_PROMPT_PREP_TIMEOUT_MS,
 			steps: timedOut,
 		});
-		process.stderr.write(
-			`Warning: system prompt preparation steps timed out after ${SYSTEM_PROMPT_PREP_TIMEOUT_MS}ms (${timedOut.join(", ")}); using minimal fallback for those steps.\n`,
-		);
+		// An interactive host writes nothing ahead of its UI (a Tern surface
+		// would open over the line); the log above has it.
+		if (!isInteractiveHost()) {
+			process.stderr.write(
+				`Warning: system prompt preparation steps timed out after ${SYSTEM_PROMPT_PREP_TIMEOUT_MS}ms (${timedOut.join(", ")}); using minimal fallback for those steps.\n`,
+			);
+		}
 	}
 	if (failed.length > 0) {
 		for (const { name, error } of failed) {
@@ -1075,6 +1104,8 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		memoryBackend,
 		securityEnabled,
 		settingsApproval,
+		outReplies,
+		subagent,
 	};
 	const filteredSkills = (options.skillDescriptions ?? new SkillDescriptionCatalog()).render(
 		hasSkillReader ? skills.filter(skill => skill.hide !== true) : [],
@@ -1135,6 +1166,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		mcpDiscoveryServerSummaries,
 		hasNativeDiscoveryToolSummaries: nativeDiscoveryToolSummaries.length > 0,
 		nativeDiscoveryToolSummaries,
+		intentGuidance: $env.PI_INTENT_PROMPT || intentGuidance || "",
 		eagerTasks,
 		eagerTasksAlways,
 		// Restrained bias yields to an explicit eager-tasks mode.

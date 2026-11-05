@@ -47,7 +47,7 @@ $NativeArchitecture = switch ($RawArchitecture.ToUpperInvariant()) {
     default { throw "Unsupported Windows architecture: $RawArchitecture" }
 }
 $BinaryName = "ompx-windows-$NativeArchitecture.exe"
-$MinimumBunVersion = "1.3.14"
+$MinimumBunVersion = "1.4.4"
 $ApiBaseUrl = if ($env:PI_GITHUB_API_BASE_URL) { $env:PI_GITHUB_API_BASE_URL.TrimEnd([char]"/") } else { "https://api.github.com/repos/$Repo" }
 $ReleaseDownloadBaseUrl = if ($env:PI_RELEASE_DOWNLOAD_BASE_URL) { $env:PI_RELEASE_DOWNLOAD_BASE_URL.TrimEnd([char]"/") } else { "https://github.com/$Repo/releases/download" }
 

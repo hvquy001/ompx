@@ -551,7 +551,11 @@ describe("browser tab-supervisor — cmux tab close mid-run (#4499)", () => {
 	});
 
 	it.each([
-		{ name: "measured", width: { value: 1000 }, note: "by 0.98 to get viewport CSS pixels for tab.clickAt" },
+		{
+			name: "measured",
+			width: { value: 1000 },
+			note: "multiply x by 0.98 and y by 1.00 to map to viewport CSS pixels for tab.clickAt",
+		},
 		{ name: "missing", width: { value: "" }, note: "scale to CSS pixels could not be read" },
 		{ name: "failed", width: new Error("eval failed"), note: "scale to CSS pixels could not be read" },
 	])("screenshot coordinate note with $name viewport width", async ({ width, note }) => {

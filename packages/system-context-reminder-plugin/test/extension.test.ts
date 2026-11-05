@@ -134,7 +134,12 @@ describe("systemContextReminderExtension", () => {
 		systemContextReminderExtension(fakePi as unknown as ExtensionAPI);
 		const beforeHandler = getHandler<BeforeAgentStartHandler>(fakePi, "before_agent_start");
 
-		const first = beforeHandler({ type: "before_agent_start", prompt: "continue", systemPrompt: ["base"] });
+		const first = beforeHandler({
+			type: "before_agent_start",
+			reason: "prompt",
+			prompt: "continue",
+			systemPrompt: ["base"],
+		});
 		expect(first?.systemPrompt).toEqual(["base", expect.stringContaining("## System Context Reminder")]);
 		const promptText = first?.systemPrompt?.join("\n\n") ?? "";
 		expect(promptText).toContain("forgot the system prompt");
@@ -144,6 +149,7 @@ describe("systemContextReminderExtension", () => {
 		expect(promptText).not.toContain("lord");
 		const second = beforeHandler({
 			type: "before_agent_start",
+			reason: "prompt",
 			prompt: "continue",
 			systemPrompt: first?.systemPrompt ?? [],
 		});
@@ -158,6 +164,7 @@ describe("systemContextReminderExtension", () => {
 
 		const beforeAgentStart = beforeAgentStartHandler({
 			type: "before_agent_start",
+			reason: "prompt",
 			prompt: "continue",
 			systemPrompt: ["base"],
 		});

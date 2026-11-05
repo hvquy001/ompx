@@ -47,6 +47,8 @@ const LOOP_CONTEXT_TOKENS: Record<string, LoopContextMode> = {
 	clean: "reset",
 };
 
+export const LOOP_CONTEXT_MODES: ReadonlySet<LoopContextMode> = new Set(Object.values(LOOP_CONTEXT_TOKENS));
+
 const TIME_UNITS_MS = new Map<string, number>([
 	["ms", 1],
 	["msec", 1],

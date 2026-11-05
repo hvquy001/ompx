@@ -559,7 +559,9 @@ describe("executeJs", () => {
 		);
 
 		expect(result.exitCode).toBe(0);
-		expect(getStatusEvents(result)).toHaveLength(2);
+		// output() first locates the file with a bounded raw read, then falls back to the protocol read when the
+		// read tool names no resolved file: one tool.read plus two output() reads.
+		expect(getStatusEvents(result)).toHaveLength(3);
 		expect(getJsonData(result)).toEqual({
 			toolResult: {
 				text: "annotated",
@@ -568,9 +570,10 @@ describe("executeJs", () => {
 			},
 			agentOutput: "from-agent",
 		});
-		expect(execute).toHaveBeenCalledTimes(2);
+		expect(execute).toHaveBeenCalledTimes(3);
 		expect(execute.mock.calls[0]?.[1]).toEqual({ path: "package.json" });
-		expect(execute.mock.calls[1]?.[1]).toEqual({ path: "agent://agent-42" });
+		expect(execute.mock.calls[1]?.[1]).toEqual({ path: "agent://agent-42:raw:1-1" });
+		expect(execute.mock.calls[2]?.[1]).toEqual({ path: "agent://agent-42" });
 	});
 
 	it("preserves nested await expressions in instrumented tool-call arguments", async () => {

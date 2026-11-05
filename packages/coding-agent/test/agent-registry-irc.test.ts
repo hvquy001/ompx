@@ -5,7 +5,7 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 import { Settings } from "../src/config/settings";
 import { IrcBus, type IrcMessage } from "../src/irc/bus";
 import { AgentLifecycleManager } from "../src/registry/agent-lifecycle";
-import { AgentRegistry } from "../src/registry/agent-registry";
+import { AgentRegistry, type AgentRegistryApi } from "../src/registry/agent-registry";
 import type { AgentSession } from "../src/session/agent-session";
 import { SessionManager } from "../src/session/session-manager";
 import { getBundledAgent } from "../src/task/agents";
@@ -51,7 +51,7 @@ function assistantMessage(text: string) {
 }
 
 function registerAgent(
-	registry: AgentRegistry,
+	registry: AgentRegistryApi,
 	id: string,
 	ircEnabled: boolean,
 	session: AgentSession | null = null,
@@ -66,7 +66,7 @@ function registerAgent(
 	});
 }
 
-function createToolSession(registry: AgentRegistry, id: string): ToolSession {
+function createToolSession(registry: AgentRegistryApi, id: string): ToolSession {
 	return {
 		cwd: "/tmp",
 		hasUI: false,

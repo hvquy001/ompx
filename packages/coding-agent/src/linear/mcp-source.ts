@@ -1,6 +1,6 @@
 import type { KanbanPriority } from "../kanban/types";
 import { callTool, listTools } from "../mcp/client";
-import { MCPManager } from "../mcp/manager";
+import { MCPManager, type MCPManagerApi } from "../mcp/manager";
 import type { MCPServerConnection, MCPToolCallResult, MCPToolDefinition } from "../mcp/types";
 import { LINEAR_SERVER_CONFIG } from "./config";
 
@@ -35,12 +35,24 @@ export class LinearMcpError extends Error {
 	}
 }
 
+type LinearConnectionManager = Pick<MCPManager, "getConnection" | "connectServers" | "waitForConnection">;
+
+/** Only the thread-owning manager exposes connection I/O; a worker's remote proxy does not. */
+function ownsConnections(manager: MCPManagerApi | undefined): manager is MCPManagerApi & LinearConnectionManager {
+	return manager !== undefined && "connectServers" in manager && typeof manager.connectServers === "function";
+}
+
 /** Reads assigned Linear work exclusively through the configured `linear` MCP server. */
 export class McpLinearSource {
-	readonly #manager: MCPManager | undefined;
+	readonly #manager: LinearConnectionManager | undefined;
 
-	constructor(manager: MCPManager | undefined = MCPManager.instance()) {
-		this.#manager = manager;
+	/**
+	 * Connection I/O (`connectServers`, live `MCPServerConnection`s) exists only on the thread that
+	 * owns the manager, so a subagent worker's remote proxy leaves the source unconfigured.
+	 */
+	constructor(manager?: LinearConnectionManager) {
+		const instance = MCPManager.instance();
+		this.#manager = manager ?? (ownsConnections(instance) ? instance : undefined);
 	}
 
 	async ensureAvailable(): Promise<void> {

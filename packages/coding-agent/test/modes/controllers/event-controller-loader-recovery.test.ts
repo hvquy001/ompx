@@ -1,9 +1,10 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, setSystemTime, vi } from "bun:test";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/event-controller";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { Loader } from "@oh-my-pi/pi-tui";
+import { spinnerInterval } from "@oh-my-pi/pi-tui/spinner-clock";
 import { createInteractiveModeContext } from "../../helpers/interactive-mode-context";
 
 import { cfgTerminalShowProgress } from "@oh-my-pi/pi-coding-agent/modes/settings";
@@ -114,6 +115,7 @@ describe("EventController loader recovery after overflow maintenance", () => {
 
 	afterEach(() => {
 		vi.useRealTimers();
+		setSystemTime();
 		vi.restoreAllMocks();
 		resetSettingsForTest();
 	});
@@ -171,6 +173,9 @@ describe("EventController loader recovery after overflow maintenance", () => {
 	});
 
 	it("ticks the auto-retry countdown down on spinner ticks instead of freezing", async () => {
+		// Loader ticks land on wall-clock multiples of the spinner period; pin the
+		// fake clock to a boundary so 400ms of advance is exactly five ticks.
+		setSystemTime(1_700_000_000_000 - (1_700_000_000_000 % spinnerInterval()));
 		const { ctx, streamState } = createContext();
 		const controller = new EventController(ctx);
 		const visible = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ClientBridge, ClientBridgeTerminalHandle } from "@oh-my-pi/pi-coding-agent/session/client-bridge";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { BashTool } from "@oh-my-pi/pi-coding-agent/tools/bash";
@@ -73,6 +73,7 @@ function shortenAcpWaits(): void {
 afterEach(() => {
 	mock.restore();
 	restorePlatform();
+	resetSettingsForTest();
 	if (previousActiveSandbox === undefined) {
 		delete Bun.env.PI_OMPX_MACOS_SANDBOX_ACTIVE_INHERITED;
 	} else {
@@ -132,6 +133,9 @@ describe("BashTool ACP terminal routing", () => {
 	});
 
 	it("keeps command execution local when macOS sandbox inheritance is active", async () => {
+		// Local execution reads the global Settings singleton; install an in-memory one before the platform is
+		// spoofed so it never opens the host agent.db (whose native addon does not exist for the fake platform).
+		await Settings.init({ inMemory: true });
 		setPlatform("darwin");
 		Bun.env.PI_OMPX_MACOS_SANDBOX_ACTIVE_INHERITED = "1";
 		const bridge: ClientBridge = {
@@ -173,7 +177,7 @@ describe("BashTool ACP terminal routing", () => {
 		const sessionEnvOf = (call: number) =>
 			Object.fromEntries(
 				(createSpy.mock.calls[call]![0].env ?? [])
-					.filter(({ name }) => name === "PI_SESSION_ID" || name === "PI_SESSION_FILE")
+					.filter(({ name }) => name.startsWith("PI_SESSION_") || name === "PI_TOOL_CALL_ID")
 					.map(({ name, value }) => [name, value]),
 			);
 
@@ -182,9 +186,17 @@ describe("BashTool ACP terminal routing", () => {
 		sessionFile = null;
 		await tool.execute("call-env-b", { command: "true" });
 
-		expect(sessionEnvOf(0)).toEqual({ PI_SESSION_ID: "session-a", PI_SESSION_FILE: fileA });
+		expect(sessionEnvOf(0)).toEqual({
+			PI_SESSION_ID: "session-a",
+			PI_SESSION_FILE: fileA,
+			PI_TOOL_CALL_ID: "call-env-a",
+		});
 		// Empty, not absent: an env overlay cannot unset a stale value inherited from a parent omp.
-		expect(sessionEnvOf(1)).toEqual({ PI_SESSION_ID: "session-b", PI_SESSION_FILE: "" });
+		expect(sessionEnvOf(1)).toEqual({
+			PI_SESSION_ID: "session-b",
+			PI_SESSION_FILE: "",
+			PI_TOOL_CALL_ID: "call-env-b",
+		});
 	});
 
 	it("extracts graphics from cumulative terminal snapshots without leaking escapes", async () => {

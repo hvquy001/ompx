@@ -265,6 +265,7 @@ describe("hasRunningAgents", () => {
 	function ref(id: string, kind: AgentRef["kind"], status: AgentRef["status"]): AgentRef {
 		return {
 			id,
+			generation: 0,
 			displayName: id,
 			kind,
 			status,

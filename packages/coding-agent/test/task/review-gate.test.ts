@@ -19,6 +19,7 @@ import * as worktreeModule from "../../src/task/worktree";
 import type { ToolSession } from "../../src/tools";
 import "../../src/tools/yield";
 import { EventBus } from "../../src/utils/event-bus";
+import { createSessionDefaults } from "../helpers/session-defaults";
 
 // --- Constants ----------------------------------------------------------------
 
@@ -98,6 +99,7 @@ function createScriptedSession(script: RoleScript): AgentSession {
 	};
 
 	return {
+		...createSessionDefaults(),
 		state,
 		agent: { state: { systemPrompt: ["test"] } },
 		model: undefined,

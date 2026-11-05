@@ -7,9 +7,9 @@ import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mo
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
+import { IrcBus, type IrcBusApi } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentRegistry, type AgentRegistryApi } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import {
 	type AuthCredential,
@@ -158,8 +158,8 @@ async function createHarness(responses: Array<MockResponse | (() => MockResponse
 
 describe("IRC idle wake continuation", () => {
 	const harnesses: Harness[] = [];
-	let registry: AgentRegistry;
-	let bus: IrcBus;
+	let registry: AgentRegistryApi;
+	let bus: IrcBusApi;
 
 	beforeEach(() => {
 		resetSettingsForTest();

@@ -8,7 +8,7 @@ Enabled by default. Disable via `/settings` UI or directly in `config.yml`:
 
 ```yaml
 secrets:
-  enabled: false
+   enabled: false
 ```
 
 The encrypted secret vault creates its encryption key lazily: no keychain entry, libsecret item, or key file is created until the first secret is actually stored (via `/secrets add`, `ompx secrets add`, or automatic prompt detection). Sessions that never store a secret spawn no credential-store subprocess.
@@ -53,10 +53,10 @@ Obfuscate-mode plain values and regex matches shorter than 8 characters are igno
 
 Define custom secret entries in YAML. Two locations are checked:
 
-| Level   | Path                       | Purpose                     |
-| ------- | -------------------------- | --------------------------- |
+| Level   | Path                                                                   | Purpose                                            |
+| ------- | ---------------------------------------------------------------------- | -------------------------------------------------- |
 | Global  | `<active-agent-dir>/secrets.yml` (normally `~/.omp/agent/secrets.yml`) | Secrets across projects using that agent directory |
-| Project | `<cwd>/.omp/secrets.yml`   | Project-specific secrets    |
+| Project | `<cwd>/.omp/secrets.yml`                                               | Project-specific secrets                           |
 
 Project entries override global entries with matching `content`. The global location follows the session's agent directory, including named profiles and explicit SDK agent-directory overrides.
 

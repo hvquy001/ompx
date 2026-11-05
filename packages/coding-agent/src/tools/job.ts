@@ -3,7 +3,7 @@ import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallb
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { formatNumber, isRecord, prompt } from "@oh-my-pi/pi-utils";
-import type { AsyncJob, AsyncJobManager, AsyncJobType } from "../async";
+import type { AsyncJob, AsyncJobManagerApi, AsyncJobType } from "../async";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { shimmerEnabled, shimmerText } from "@oh-my-pi/pi-tui/theme/shimmer";
 import type { Theme } from "@oh-my-pi/pi-tui/theme";
@@ -548,7 +548,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	 * Drops missing ids and ids owned by other agents, so cross-agent inspection
 	 * via the `job` tool is impossible.
 	 */
-	#visibleJobs(manager: AsyncJobManager, ids: string[], ownerId: string | undefined): AsyncJob[] {
+	#visibleJobs(manager: AsyncJobManagerApi, ids: string[], ownerId: string | undefined): AsyncJob[] {
 		const out: AsyncJob[] = [];
 		for (const id of ids) {
 			const job = manager.getJob(id);
@@ -649,7 +649,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	}
 
 	#buildResult(
-		manager: AsyncJobManager,
+		manager: AsyncJobManagerApi,
 		jobs: JobRecord[],
 		cancelOutcomes: CancelOutcome[],
 		compactionScheduled = false,

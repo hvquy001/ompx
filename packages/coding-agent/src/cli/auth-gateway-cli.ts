@@ -39,17 +39,19 @@ import {
 import {
 	type AuthGatewayClient,
 	DEFAULT_AUTH_GATEWAY_BIND,
+	type ModelResolveOptions,
 	parseAuthGatewayClients,
 	startAuthGateway,
 } from "@oh-my-pi/pi-ai/auth-gateway";
 import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
+import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
 import { type GeneratedProvider, getBundledModels, getEffectiveTokenCost } from "@oh-my-pi/pi-catalog/models";
 import { type ModelKind, modelKind } from "@oh-my-pi/pi-catalog/types";
 import { APP_NAME, getAgentDbPath, getConfigRootDir, logger, VERSION } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { setTransports as setLoggerTransports } from "@oh-my-pi/pi-utils/logger";
 import { ModelRegistry } from "../config/model-registry";
-import { cfgDisabledProviders } from "../config/model-settings";
+import { cfgDisabledProviders, cfgModelProviderOrder } from "../config/model-settings";
 import { resolveProviderModelReference } from "../config/model-resolver";
 import { ModelsConfigFile } from "../config/models-config";
 import { resolveConfigValue } from "../config/resolve-config-value";
@@ -355,22 +357,90 @@ export function gatewayRoutableProviders(storage: AuthStorage, settings: Setting
 }
 
 /**
- * Resolve a client-requested model id: the exact `provider/id` or bare `id` first, then an
- * OpenRouter routing-variant selector the catalog does not list (`openrouter/<id>:floor`,
- * `:nitro`, …), cloned from its base model under the requested id so the suffix reaches
- * OpenRouter — the same selectors `--model` accepts.
+ * One catalog rebuild's served models, indexed by the ids clients send. Built by
+ * {@link indexModelsByRequestId}, read by {@link resolveGatewayModel} and `/v1/models`.
+ */
+export interface GatewayModelIndex {
+	/**
+	 * Every served model, catalog order. One array per rebuild:
+	 * `resolveProviderModelReference` caches its lookups on the array identity.
+	 */
+	readonly models: readonly Model<Api>[];
+	/** `provider/id` → model. */
+	readonly qualified: ReadonlyMap<string, Model<Api>>;
+	/**
+	 * Bare `id` → its models grouped into provider-priority tiers, best first.
+	 * A tier holds the providers sharing one rank (every provider the priority
+	 * order leaves unranked shares the last), sorted by provider id.
+	 */
+	readonly bare: ReadonlyMap<string, readonly (readonly Model<Api>[])[]>;
+}
+
+/**
+ * Index the models of credentialed providers by the request ids clients may
+ * send: `provider/id` names one model, a bare `id` every served model of that
+ * id. Bare ids rank by provider priority (`providerOrder`, the
+ * `modelProviderOrder` setting, ahead of the built-in native-before-mirror
+ * order), then provider id — never catalog position, which every discovery
+ * refresh reshuffles.
+ */
+export function indexModelsByRequestId(
+	models: readonly Model<Api>[],
+	providersWithCreds: ReadonlySet<string>,
+	providerOrder?: readonly string[],
+): GatewayModelIndex {
+	const served = models.filter(model => providersWithCreds.has(model.provider));
+	const priority = buildModelProviderPriorityRank(providerOrder);
+	const rankOf = (model: Model<Api>): number => priority.get(model.provider.toLowerCase()) ?? Number.POSITIVE_INFINITY;
+	const qualified = new Map<string, Model<Api>>();
+	const byId = new Map<string, Model<Api>[]>();
+	for (const model of served) {
+		qualified.set(`${model.provider}/${model.id}`, model);
+		const sameId = byId.get(model.id);
+		if (sameId) sameId.push(model);
+		else byId.set(model.id, [model]);
+	}
+	const bare = new Map<string, Model<Api>[][]>();
+	for (const [id, candidates] of byId) {
+		candidates.sort((a, b) => rankOf(a) - rankOf(b) || a.provider.localeCompare(b.provider));
+		const tiers: Model<Api>[][] = [];
+		let tierRank: number | undefined;
+		for (const model of candidates) {
+			const rank = rankOf(model);
+			if (rank === tierRank) tiers[tiers.length - 1].push(model);
+			else tiers.push([model]);
+			tierRank = rank;
+		}
+		bare.set(id, tiers);
+	}
+	return { models: served, qualified, bare };
+}
+
+/**
+ * Resolve a client-requested model id: the exact `provider/id`, else the bare
+ * `id`'s best candidate — the first priority tier `options.accepts` admits any
+ * model from, preferring one on the route's `options.api` within it — else an
+ * OpenRouter routing-variant selector the catalog does not list
+ * (`openrouter/<id>:floor`, `:nitro`, …), cloned from its base model under the
+ * requested id so the suffix reaches OpenRouter — the same selectors `--model`
+ * accepts. A refused `provider/id` resolves to nothing.
  */
 export function resolveGatewayModel(
 	id: string,
-	modelById: ReadonlyMap<string, Model<Api>>,
-	routable: readonly Model<Api>[],
+	index: GatewayModelIndex,
+	options?: ModelResolveOptions,
 ): Model<Api> | undefined {
-	const exact = modelById.get(id);
-	if (exact) return exact;
+	const accepts = options?.accepts ?? (() => true);
+	const exact = index.qualified.get(id);
+	if (exact) return accepts(exact) ? exact : undefined;
+	for (const tier of index.bare.get(id) ?? []) {
+		const admitted = tier.filter(accepts);
+		if (admitted.length > 0) return admitted.find(model => model.api === options?.api) ?? admitted[0];
+	}
 	const prefix = "openrouter/";
-	return id.startsWith(prefix)
-		? resolveProviderModelReference("openrouter", id.slice(prefix.length), routable)
-		: undefined;
+	if (!id.startsWith(prefix)) return undefined;
+	const variant = resolveProviderModelReference("openrouter", id.slice(prefix.length), index.models);
+	return variant && accepts(variant) ? variant : undefined;
 }
 
 /**
@@ -467,9 +537,10 @@ async function resolveGatewayCredentialSource(
 	return createLocalCredentialSource();
 }
 
-interface GatewayModelIndex {
+interface GatewayServedModels {
+	index: GatewayModelIndex;
+	/** `/v1/models` listing: every served model plus the alias clones. */
 	listModels: Model<Api>[];
-	resolveById: Map<string, Model<Api>>;
 }
 interface BuildGatewayModelIndexOptions {
 	includeAliases?: boolean;
@@ -490,26 +561,6 @@ function modelIdEntries(model: Model<Api>): string[] {
 	return [qualifiedModelId(model), model.id];
 }
 
-/**
- * Index resolvable models by the request ids clients may send: the
- * provider-qualified `provider/id` (always) and the bare `id` (first-write-wins
- * fallback for legacy clients). Scoped to providers the gateway holds broker
- * credentials for, since only those are routable.
- */
-export function indexModelsByRequestId(
-	models: readonly Model<Api>[],
-	providersWithCreds: ReadonlySet<string>,
-): Map<string, Model<Api>> {
-	const modelById = new Map<string, Model<Api>>();
-	for (const model of models) {
-		if (!providersWithCreds.has(model.provider)) continue;
-		for (const entry of modelIdEntries(model)) {
-			if (!modelById.has(entry)) modelById.set(entry, model);
-		}
-	}
-	return modelById;
-}
-
 function cloneAliasModel(alias: string, target: Model<Api>): Model<Api> {
 	return { ...target, id: alias };
 }
@@ -520,18 +571,21 @@ function aliasShortId(alias: string): string | undefined {
 }
 
 function setAliasResolution(
-	resolveById: Map<string, Model<Api>>,
+	qualified: Map<string, Model<Api>>,
+	bare: Map<string, readonly (readonly Model<Api>[])[]>,
 	alias: string,
 	entry: string,
 	target: Model<Api>,
+	isQualified: boolean,
 ): void {
-	const existing = resolveById.get(entry);
+	const existing = isQualified ? qualified.get(entry) : bare.get(entry)?.[0]?.[0];
 	if (existing && existing !== target) {
 		throw new Error(
 			`auth-gateway model alias "${alias}" short id "${entry}" collides with existing model ${qualifiedModelId(existing)}`,
 		);
 	}
-	resolveById.set(entry, target);
+	if (isQualified) qualified.set(entry, target);
+	else bare.set(entry, [[target]]);
 }
 
 function assertAliasCapabilities(
@@ -558,7 +612,7 @@ function loadAuthGatewayModelAliases(): Record<string, string> {
 async function buildGatewayModelIndex(
 	source: AuthGatewayCredentialSource,
 	options: BuildGatewayModelIndexOptions = {},
-): Promise<GatewayModelIndex> {
+): Promise<GatewayServedModels> {
 	const storage = source.storage;
 	const registry =
 		source.kind === "broker"
@@ -583,8 +637,7 @@ async function buildGatewayModelIndex(
 		}
 	}
 	const models = source.kind === "broker" ? registry.getAll() : registry.getAvailable();
-	const resolveById = new Map<string, Model<Api>>();
-	const listModels: Model<Api>[] = [];
+	const served: Model<Api>[] = [];
 	// Local opt-outs apply to local credentials only; a broker source serves what the broker holds.
 	const disabledProviders =
 		source.kind === "broker" ? new Set<string>() : new Set(cfgDisabledProviders.get(source.settings));
@@ -600,26 +653,31 @@ async function buildGatewayModelIndex(
 		) {
 			continue;
 		}
-		listModels.push(model);
-		for (const entry of modelIdEntries(model)) {
-			if (!resolveById.has(entry)) resolveById.set(entry, model);
-		}
+		served.push(model);
 	}
-	if (options.includeAliases === false) return { listModels, resolveById };
+	const index = indexModelsByRequestId(
+		served,
+		new Set(served.map(model => model.provider)),
+		cfgModelProviderOrder.get(source.settings),
+	);
+	const listModels = [...served];
+	if (options.includeAliases === false) return { index, listModels };
+	const qualified = new Map(index.qualified);
+	const bare = new Map(index.bare);
 	for (const [alias, targetName] of Object.entries(loadAuthGatewayModelAliases())) {
-		const target = resolveById.get(targetName);
+		const target = resolveGatewayModel(targetName, index);
 		if (!target) {
 			throw new Error(`auth-gateway model alias "${alias}" target "${targetName}" is not available`);
 		}
 		assertAliasCapabilities(alias, targetName, allModelById.get(alias), target);
-		for (const entry of modelIdEntries(cloneAliasModel(alias, target))) {
-			setAliasResolution(resolveById, alias, entry, target);
-		}
+		const [qualifiedEntry, bareEntry] = modelIdEntries(cloneAliasModel(alias, target));
+		setAliasResolution(qualified, bare, alias, qualifiedEntry, target, true);
+		setAliasResolution(qualified, bare, alias, bareEntry, target, false);
 		const shortId = aliasShortId(alias);
-		if (shortId) setAliasResolution(resolveById, alias, shortId, target);
+		if (shortId) setAliasResolution(qualified, bare, alias, shortId, target, false);
 		listModels.push(cloneAliasModel(alias, target));
 	}
-	return { listModels, resolveById };
+	return { index: { models: index.models, qualified, bare }, listModels };
 }
 
 function describeSource(source: AuthGatewayCredentialSource): string {
@@ -700,7 +758,7 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	const source = await resolveGatewayCredentialSource(flags);
 	const storage = source.storage;
 	let modelIndex = await buildGatewayModelIndex(source);
-	if (modelIndex.resolveById.size === 0) {
+	if (modelIndex.listModels.length === 0) {
 		storage.close();
 		throw new Error(
 			`No auth-gateway models available from ${describeSource(source)}. Add a provider API key or OAuth credential first.`,
@@ -713,7 +771,7 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 		bearerTokens: gatewayToken ? [gatewayToken] : [],
 		trustProxyHeaders: flags.trustProxyHeaders,
 		version: VERSION,
-		resolveModel: (id: string) => resolveGatewayModel(id, modelIndex.resolveById, modelIndex.listModels),
+		resolveModel: (id, options) => resolveGatewayModel(id, modelIndex.index, options),
 		listModels: () => modelIndex.listModels,
 		excludeProviders:
 			source.kind === "broker" ? new Set<string>() : new Set(cfgDisabledProviders.get(source.settings)),

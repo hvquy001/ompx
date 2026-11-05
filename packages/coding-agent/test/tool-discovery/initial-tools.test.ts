@@ -19,6 +19,7 @@ import {
 	ContextNotesTool,
 	NewContextTool,
 	BrowserJevTool,
+	JevScoutTool,
 } from "@oh-my-pi/pi-coding-agent/tools";
 import { cfgMcpDiscoveryMode } from "../../src/mcp/settings";
 import { cfgToolsDiscoveryMode } from "../../src/tools/settings";
@@ -87,6 +88,8 @@ async function getToolMetadata(): Promise<Map<string, { loadMode?: string; summa
 		// `browser_jev` only builds with a TypeSafe key in the environment, so
 		// construct it directly to check its loading fields.
 		new BrowserJevTool(toolSession),
+		// `jev_scout` builds only while a System One endpoint is configured, so construct it directly.
+		new JevScoutTool(toolSession),
 	]) {
 		metadata.set(tool.name, { loadMode: tool.loadMode, summary: tool.summary });
 	}

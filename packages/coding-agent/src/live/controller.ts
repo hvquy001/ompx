@@ -1,5 +1,5 @@
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import { prompt } from "@oh-my-pi/pi-utils";
+import { prompt, toError } from "@oh-my-pi/pi-utils";
 import type { LiveAgentEndpoint, LiveAgentIdentity, LiveMediaEndpoint } from "./endpoints";
 import liveInstructionsTemplate from "./prompts/live-instructions.md" with { type: "text" };
 import {
@@ -8,6 +8,7 @@ import {
 	type LiveClientMessage,
 	type LiveServerEvent,
 } from "./protocol";
+import { OutputActivity } from "./output-activity";
 import { CodexLiveTransport, type LiveTransportOptions } from "./transport";
 import type { LivePhase } from "@oh-my-pi/pi-tui/apps/live-visualizer";
 import { DEFAULT_LIVE_VOICE } from "./voices";
@@ -17,8 +18,6 @@ import { DEFAULT_LIVE_VOICE } from "./voices";
  * id and says nothing about language; this is the locale the model answers in.
  */
 const DEFAULT_LANGUAGE = "vi-VN";
-/** Output RMS at or above this level counts as the assistant actively speaking. */
-export const OUTPUT_ACTIVE_LEVEL = 0.015;
 
 /** Incremental or final transcript for one realtime conversational turn. */
 export interface LiveTranscript {
@@ -41,6 +40,8 @@ export interface LiveSessionCallbacks {
 
 /** Control plane the controller drives; `CodexLiveTransport` is the production implementation. */
 export interface LiveControlTransport {
+	/** SDP answer for a caller-owned peer, once an `sdpOffer` call has been signaled. */
+	readonly sdpAnswer?: string;
 	connect(): Promise<void>;
 	send(message: LiveClientMessage): Promise<void>;
 	close(): Promise<void>;
@@ -72,10 +73,15 @@ export interface LiveSessionControllerOptions {
 	instructions?: string;
 	/** Control-plane factory; defaults to the Codex live transport. Overridable for tests. */
 	createTransport?: (options: LiveTransportOptions) => LiveControlTransport;
-}
-
-function errorFrom(cause: unknown): Error {
-	return cause instanceof Error ? cause : new Error(String(cause));
+	/**
+	 * SDP offer from a caller-owned WebRTC peer that carries the microphone and speaker audio
+	 * (see `LiveTransportOptions.sdpOffer`). When set, the media endpoint is not used for the call:
+	 * the caller applies {@link LiveSessionController.sdpAnswer} to its peer after `start()`
+	 * and handles echo cancellation itself. There is no host track to mute: `toggleMute` only
+	 * moves the phase to `muted`, and the caller must silence its own microphone track while the
+	 * phase is `muted`. Levels are not reported in this mode.
+	 */
+	sdpOffer?: string;
 }
 
 /**
@@ -104,6 +110,7 @@ export class LiveSessionController {
 	readonly #language: string;
 	readonly #instructionsTemplate: string;
 	readonly #createTransport: (options: LiveTransportOptions) => LiveControlTransport;
+	readonly #sdpOffer: string | undefined;
 
 	#transport: LiveControlTransport | undefined;
 	#sendChain: Promise<void> = Promise.resolve();
@@ -114,7 +121,6 @@ export class LiveSessionController {
 	#failure: Error | undefined;
 	#muted = false;
 	#phase: LivePhase = "connecting";
-	#outputLevel = 0;
 	#activeDelegationId: string | undefined;
 	#userTranscript = "";
 	#assistantTranscript = "";
@@ -123,6 +129,11 @@ export class LiveSessionController {
 	#userTranscriptTurn = 0;
 	#assistantTranscriptTurn = 0;
 	#lastTranscript: LiveTranscript | undefined;
+	readonly #outputActivity = new OutputActivity(() =>
+		this.#guardEvent(() => {
+			if (!this.#activeDelegationId) this.#refreshAudioPhase();
+		}),
+	);
 
 	constructor(options: LiveSessionControllerOptions) {
 		this.#media = options.media;
@@ -134,6 +145,7 @@ export class LiveSessionController {
 		this.#language = options.language?.trim() || DEFAULT_LANGUAGE;
 		this.#instructionsTemplate = options.instructions ?? liveInstructionsTemplate;
 		this.#createTransport = options.createTransport ?? (opts => new CodexLiveTransport(opts));
+		this.#sdpOffer = options.sdpOffer;
 	}
 
 	/** Current realtime call phase. */
@@ -146,7 +158,15 @@ export class LiveSessionController {
 		return this.#muted;
 	}
 
-	/** Connects the realtime surface and starts microphone streaming. */
+	/**
+	 * SDP answer for the caller's peer in an `sdpOffer` session. It exists as soon as the offer is
+	 * signaled, before the control socket connects, so apply it only after `start()` resolves.
+	 */
+	get sdpAnswer(): string | undefined {
+		return this.#transport?.sdpAnswer;
+	}
+
+	/** Connects the realtime surface and starts microphone streaming (or, with `sdpOffer`, only signaling). */
 	async start(): Promise<void> {
 		if (this.#stopped) {
 			throw (
@@ -180,6 +200,7 @@ export class LiveSessionController {
 				instructions,
 				voice: this.#voice,
 				media: this.#media,
+				sdpOffer: this.#sdpOffer,
 				callbacks: { onEvent: event => this.#guardEvent(() => this.#handleLiveEvent(event)) },
 			});
 			this.#transport = transport;
@@ -193,7 +214,7 @@ export class LiveSessionController {
 			}
 			this.#refreshAudioPhase();
 		} catch (cause) {
-			const error = errorFrom(cause);
+			const error = toError(cause);
 			this.#reportFailure(error);
 			await this.stop();
 			throw error;
@@ -205,7 +226,7 @@ export class LiveSessionController {
 		if (this.#stopped) return;
 		this.#muted = !this.#muted;
 		this.#refreshAudioPhase();
-		void this.#media.setMuted(this.#muted).catch(cause => this.#reportFailure(errorFrom(cause)));
+		void this.#media.setMuted(this.#muted).catch(cause => this.#reportFailure(toError(cause)));
 	}
 
 	/** Stops recording, closes the live session, and emits one terminal callback. */
@@ -216,12 +237,13 @@ export class LiveSessionController {
 
 	async #stop(): Promise<void> {
 		this.#stopped = true;
+		this.#outputActivity.dispose();
 		let cleanupError: Error | undefined;
 
 		try {
 			await this.#agent.close();
 		} catch (cause) {
-			cleanupError = errorFrom(cause);
+			cleanupError = toError(cause);
 		}
 
 		await this.#sendChain;
@@ -231,19 +253,19 @@ export class LiveSessionController {
 			try {
 				await transport.send(buildSessionClose());
 			} catch (cause) {
-				cleanupError ??= errorFrom(cause);
+				cleanupError ??= toError(cause);
 			}
 			try {
 				await transport.close();
 			} catch (cause) {
-				cleanupError ??= errorFrom(cause);
+				cleanupError ??= toError(cause);
 			}
 		}
 
 		try {
 			await this.#media.close();
 		} catch (cause) {
-			cleanupError ??= errorFrom(cause);
+			cleanupError ??= toError(cause);
 		}
 
 		if (cleanupError) this.#emitPhaseSafely("error");
@@ -255,14 +277,15 @@ export class LiveSessionController {
 		try {
 			handler();
 		} catch (cause) {
-			this.#reportFailure(errorFrom(cause));
+			this.#reportFailure(toError(cause));
 		}
 	}
 
 	#handleLiveEvent(event: LiveServerEvent): void {
 		switch (event.type) {
 			case "session.started":
-				this.#emitPhase("listening");
+				// Mute wins over server-driven phases: a remote peer treats any other phase as unmuted.
+				this.#refreshAudioPhase();
 				break;
 			case "session.updated":
 			case "output_audio.delta":
@@ -295,7 +318,7 @@ export class LiveSessionController {
 		request = request.trim();
 		if (!request) return;
 		this.#activeDelegationId = event.item.id;
-		this.#emitPhase("working");
+		this.#refreshAudioPhase();
 		this.#agent.startDelegation(event.item.id, request);
 	}
 
@@ -306,7 +329,7 @@ export class LiveSessionController {
 	}
 
 	#handleOutputLevel(level: number): void {
-		this.#outputLevel = Number.isFinite(level) ? level : 0;
+		this.#outputActivity.observe(Number.isFinite(level) ? level : 0);
 		if (!this.#activeDelegationId) this.#refreshAudioPhase();
 	}
 
@@ -383,7 +406,7 @@ export class LiveSessionController {
 			.then(async () => {
 				if (!this.#stopped) await transport.send(message);
 			})
-			.catch(cause => this.#reportFailure(errorFrom(cause)));
+			.catch(cause => this.#reportFailure(toError(cause)));
 	}
 
 	#refreshAudioPhase(): void {
@@ -392,7 +415,7 @@ export class LiveSessionController {
 			this.#emitPhase("muted");
 		} else if (this.#activeDelegationId) {
 			this.#emitPhase("working");
-		} else if (this.#outputLevel > OUTPUT_ACTIVE_LEVEL) {
+		} else if (this.#outputActivity.active) {
 			this.#emitPhase("speaking");
 		} else {
 			this.#emitPhase("listening");
@@ -405,7 +428,7 @@ export class LiveSessionController {
 		try {
 			this.#callbacks.onPhase(phase);
 		} catch (cause) {
-			this.#reportFailure(errorFrom(cause));
+			this.#reportFailure(toError(cause));
 		}
 	}
 
@@ -423,7 +446,7 @@ export class LiveSessionController {
 		try {
 			this.#callbacks.onTranscript(transcript);
 		} catch (cause) {
-			this.#reportFailure(errorFrom(cause));
+			this.#reportFailure(toError(cause));
 		}
 	}
 

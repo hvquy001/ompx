@@ -20,9 +20,19 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { $env, $which, APP_NAME, compareVersions, isCompiledBinary, isEnoent, VERSION } from "@oh-my-pi/pi-utils";
+import {
+	$env,
+	$which,
+	APP_NAME,
+	compareVersions,
+	getUpdateStateDir,
+	isCompiledBinary,
+	isEnoent,
+	VERSION,
+	WhichCachePolicy,
+} from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
-import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
+import { type FileLockHandle, tryAcquireFileLock, withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import { $ } from "bun";
 import { settings } from "../config/settings";
 import { theme } from "@oh-my-pi/pi-tui/theme";
@@ -70,6 +80,18 @@ function currentNativeTag(): string {
 export function installScriptUrl(tag: string): string {
 	return `https://raw.githubusercontent.com/${REPO}/${tag}/scripts/install.sh`;
 }
+
+/**
+ * Live progress of an install, for callers that display it (the auto-update
+ * banner). `installing` covers the binary swap and package-manager runs, which
+ * report no byte count.
+ */
+export type UpdateProgress =
+	| { phase: "downloading"; version: string; received: number; total: number }
+	| { phase: "installing"; version: string };
+
+/** Receives {@link UpdateProgress} while an update installs. */
+export type UpdateProgressListener = (progress: UpdateProgress) => void;
 
 /** Distribution channel advertised by a release's published npm manifest. */
 export type ReleaseDist = "npm" | "binary";
@@ -333,6 +355,8 @@ export interface VerifiedBinaryDownloadOptions {
 	expectedSize: number;
 	expectedDigest: string;
 	fetchImpl?: Fetch;
+	/** Bytes received so far, after each chunk. */
+	onProgress?: (received: number) => void;
 }
 
 /**
@@ -373,6 +397,7 @@ export async function downloadVerifiedBinary(options: VerifiedBinaryDownloadOpti
 				return;
 			}
 			hash.update(chunk);
+			options.onProgress?.(size);
 			callback(null, chunk);
 		},
 	});
@@ -545,6 +570,18 @@ export async function managedInstallName(binaryPath: string): Promise<string | u
 	if (!isRecord(manifest)) return undefined;
 	const name = typeof manifest.name === "string" && manifest.name ? manifest.name : manifest.manager;
 	return typeof name === "string" && name ? name : undefined;
+}
+
+/**
+ * Whether the running omp may install its own updates: not a source checkout
+ * (git updates it), not kept by a managing app (Tern updates its omp itself),
+ * and not in the Nix store. Judged from the running build alone, without the
+ * package-manager probes `omp update` runs.
+ */
+export async function canSelfUpdate(): Promise<boolean> {
+	if (isSourceCheckout()) return false;
+	if (isPathInDirectory(isCompiledBinary() ? process.execPath : import.meta.dir, NIX_STORE_DIR)) return false;
+	return (await managedInstallName(process.execPath)) === undefined;
 }
 
 function isSymlinkPath(p: string): boolean {
@@ -1345,8 +1382,10 @@ async function validateExistingUpdateTarget(targetPath: string): Promise<void> {
 /**
  * Run the PATH-resolved omp binary and check if it reports the expected version.
  */
-async function verifyInstalledVersion(expectedVersion: string): Promise<InstalledVersionVerification> {
-	const ompPath = resolveOmpPath();
+export async function verifyInstalledVersion(expectedVersion: string): Promise<InstalledVersionVerification> {
+	// A fresh lookup: the install may have moved what PATH resolves to (a Windows
+	// shim takeover retires `omp.cmd` for `omp.exe`) since the target was resolved.
+	const ompPath = $which(APP_NAME, { cache: WhichCachePolicy.Fresh }) ?? undefined;
 	if (!ompPath) return { ok: false };
 	const binaryPath = tryRealpath(ompPath) ?? ompPath;
 	return await verifyBinaryAtPath(binaryPath, expectedVersion);
@@ -1874,6 +1913,7 @@ function packageManagerUpdateSteps(
 	manager: "bun" | "npm",
 	release: ReleaseInfo,
 	allowPrerelease: boolean,
+	onProgress?: UpdateProgressListener,
 ): ManagerUpdateSteps {
 	return {
 		manager,
@@ -1883,9 +1923,9 @@ function packageManagerUpdateSteps(
 			// npm's script shims outrank `.exe` in PowerShell and Git Bash, so
 			// they must be retired rather than merely shadowed.
 			if (isWindowsScriptLauncherPath(launcherPath)) {
-				await updateViaShimTakeover(launcherPath, release.version, { allowPrerelease });
+				await updateViaShimTakeover(launcherPath, release.version, { allowPrerelease, onProgress });
 			} else {
-				await updateViaBinaryAt(launcherPath, release.version, { allowPrerelease });
+				await updateViaBinaryAt(launcherPath, release.version, { allowPrerelease, onProgress });
 			}
 		},
 	};
@@ -2012,6 +2052,7 @@ export async function updateViaBinaryAt(
 		/** Refuse replacement unless the existing path is a non-script OMP executable. */
 		validateExistingTarget?: boolean;
 		verifyInstalledVersion?: typeof verifyInstalledVersion;
+		onProgress?: UpdateProgressListener;
 	} = {},
 ): Promise<void> {
 	if (options.validateExistingTarget) await validateExistingUpdateTarget(targetPath);
@@ -2042,8 +2083,11 @@ export async function updateViaBinaryAt(
 		expectedSize: asset.size,
 		expectedDigest: asset.digest,
 		fetchImpl: options.fetchImpl,
+		onProgress: received =>
+			options.onProgress?.({ phase: "downloading", version: expectedVersion, received, total: asset.size }),
 	});
 	console.log(chalk.dim(`Verified ${asset.digest}`));
+	options.onProgress?.({ phase: "installing", version: expectedVersion });
 
 	// Serialize the target swap and stale-artifact sweep per target so two
 	// overlapping `omp update` runs never replace the same binary concurrently
@@ -2194,6 +2238,7 @@ export async function updateViaShimTakeover(
 		githubToken?: string;
 		allowPrerelease?: boolean;
 		verifyBinary?: typeof verifyBinaryAtPath;
+		onProgress?: UpdateProgressListener;
 	} = {},
 ): Promise<void> {
 	const binaryName = options.binaryName ?? getBinaryName();
@@ -2215,8 +2260,11 @@ export async function updateViaShimTakeover(
 		expectedSize: asset.size,
 		expectedDigest: asset.digest,
 		fetchImpl: options.fetchImpl,
+		onProgress: received =>
+			options.onProgress?.({ phase: "downloading", version: expectedVersion, received, total: asset.size }),
 	});
 	console.log(chalk.dim(`Verified ${asset.digest}`));
+	options.onProgress?.({ phase: "installing", version: expectedVersion });
 	const forwarded: Array<{ launcher: string; original: string }> = [];
 	const stuck: string[] = [];
 	// Serialize the launcher swap and artifact sweep so two overlapping updates
@@ -2325,28 +2373,60 @@ function persistChannel(channel: UpdateChannel): void {
 	}
 }
 
+/** Options for {@link runUpdateCommand}: the `omp update` flags, plus a progress listener for background runs. */
+export interface UpdateOptions {
+	force: boolean;
+	check: boolean;
+	/** Switch to and persist this channel; unset keeps `update.channel`. */
+	channel?: UpdateChannel;
+	onProgress?: UpdateProgressListener;
+}
+
+/** How {@link runUpdateCommand} ended without an error. */
+export type UpdateOutcome =
+	/** Nothing newer to install. */
+	| { kind: "current" }
+	/** `--check` found `version`; nothing was installed. */
+	| { kind: "available"; version: string }
+	/** This install cannot update itself (a managing app, Nix, a channel its installer lacks). */
+	| { kind: "unsupported"; reason: string }
+	/** The installer ran for `version`; whether the launcher now reports it was printed, not checked. */
+	| { kind: "installed"; version: string };
+
+/** `<what>: <reason>`, keeping `err` as the cause. */
+function updateError(what: string, err: unknown): Error {
+	return new Error(`${what}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+}
+
+/**
+ * Lock held while an update installs, so `omp update` and the background
+ * auto-update never run two installers (two `bun install -g`, or a package
+ * manager racing a binary swap) against the same install.
+ */
+function acquireInstallLock(): FileLockHandle {
+	const dir = getUpdateStateDir();
+	fs.mkdirSync(dir, { recursive: true });
+	const lock = tryAcquireFileLock(path.join(dir, "install"));
+	if (!lock) throw new Error(`Another ${APP_NAME} update is already running; try again once it finishes.`);
+	return lock;
+}
+
 /**
  * Run the update command.
  */
-export async function runUpdateCommand(opts: {
-	force: boolean;
-	check: boolean;
-	channel?: UpdateChannel;
-}): Promise<void> {
+export async function runUpdateCommand(opts: UpdateOptions): Promise<UpdateOutcome> {
 	const ompPath = resolveOmpPath();
 	const manager = ompPath ? await managedInstallName(ompPath) : undefined;
 	if (manager) {
-		console.log(
-			chalk.yellow(`${ompPath} is installed and kept up to date by ${manager}; update it from ${manager}.`),
-		);
-		return;
+		const reason = `${ompPath} is installed and kept up to date by ${manager}; update it from ${manager}.`;
+		console.log(chalk.yellow(reason));
+		return { kind: "unsupported", reason };
 	}
 	console.log(chalk.dim(`Current version: ${VERSION}`));
 	const persistedChannel = readPersistedChannel() ?? "stable";
 	const channel = opts.channel ?? persistedChannel;
 	const isChannelSwitch = opts.channel !== undefined && opts.channel !== persistedChannel;
 	if (channel === "canary") console.log(chalk.dim("Current channel: canary"));
-
 	// Check for updates
 	let release: ReleaseInfo;
 	try {
@@ -2356,8 +2436,7 @@ export async function runUpdateCommand(opts: {
 			registry: (await loadNpmRegistryResolver())(PACKAGE).url,
 		};
 	} catch (err) {
-		console.error(chalk.red(`Failed to check for updates: ${err}`));
-		process.exit(1);
+		throw updateError("Failed to check for updates", err);
 	}
 
 	const comparison = Bun.semver.order(release.version, VERSION);
@@ -2365,7 +2444,7 @@ export async function runUpdateCommand(opts: {
 	if (comparison <= 0 && !opts.force && !isChannelSwitch) {
 		const icon = theme?.status?.success ?? "✔";
 		console.log(chalk.green(`${icon} Already up to date`));
-		return;
+		return { kind: "current" };
 	}
 
 	if (isChannelSwitch) {
@@ -2385,52 +2464,64 @@ export async function runUpdateCommand(opts: {
 
 	if (opts.check) {
 		// Just check, don't install
-		return;
+		return { kind: "available", version: release.version };
 	}
 
+	const onProgress = opts.onProgress;
+	const installing = (): void => onProgress?.({ phase: "installing", version: release.version });
 	// Select the owning updater for the PATH-resolved OMPx executable. Homebrew
 	// and mise continue to manage their release binaries; POSIX standalone OMPx
 	// installs use the fork's pinned install script and retain binary fallback.
+	// The lock keeps `ompx update` and the background auto-update from running
+	// two installers against the same install.
+	const lock = acquireInstallLock();
 	try {
 		const forceBinary = shouldForceBinaryUpdate(release);
 		const allowPrerelease = channel === "canary";
 		const target = await resolveUpdateTarget({ allowPackageManagers: !forceBinary });
 		if (channel === "canary" && (target.method === "nix" || target.method === "brew" || target.method === "mise")) {
-			console.log(chalk.yellow("Canary updates are only supported for bun, npm, or binary installs."));
-			return;
+			const reason = "Canary updates are only supported for bun, npm, or binary installs.";
+			console.log(chalk.yellow(reason));
+			return { kind: "unsupported", reason };
 		}
 		if (target.method === "nix") {
-			console.log(chalk.yellow("This installation is managed by Nix and cannot update itself."));
+			const reason = "This installation is managed by Nix and cannot update itself.";
+			console.log(chalk.yellow(reason));
 			console.log(chalk.dim("Update the flake input or profile that provides omp, then rebuild."));
-			return;
+			return { kind: "unsupported", reason };
 		} else if (target.method === "brew") {
+			installing();
 			await updateViaHomebrew(release.version, opts.force);
 		} else if (target.method === "mise") {
+			installing();
 			await updateViaMise(release.version, opts.force);
 		} else if (target.method === "bun" || target.method === "npm") {
 			if (forceBinary) {
 				if (!target.path) throw new Error(`Could not resolve ${APP_NAME} launcher path in PATH`);
 				console.log(chalk.dim("This release ships as a standalone binary; replacing the script launcher."));
-				await updateViaShimTakeover(target.path, release.version, { allowPrerelease });
+				await updateViaShimTakeover(target.path, release.version, { allowPrerelease, onProgress });
 				console.log(
 					chalk.yellow(
 						`This install is no longer managed by ${target.method}. Removing the old global package may delete this launcher; if it does, reinstall with: ${installerHint()}`,
 					),
 				);
 			} else {
+				installing();
 				await updateViaManager(
 					release,
 					target.path,
-					packageManagerUpdateSteps(target.method, release, allowPrerelease),
+					packageManagerUpdateSteps(target.method, release, allowPrerelease, onProgress),
 				);
 			}
 		} else {
 			if (process.platform !== "win32" && !forceBinary) {
 				try {
+					installing();
 					await updateViaInstallScript({ targetPath: target.path, release });
 					printVerifiedVersion(release.version);
 					console.log(chalk.dim(`Restart ${APP_NAME} to use the new version`));
-					return;
+					if (opts.channel) persistChannel(channel);
+					return { kind: "installed", version: release.version };
 				} catch (err) {
 					console.error(chalk.yellow(`Install script update failed: ${err}`));
 					console.log(chalk.dim("Falling back to direct binary download..."));
@@ -2442,6 +2533,7 @@ export async function runUpdateCommand(opts: {
 			await updateViaBinaryAt(target.path, release.version, {
 				allowPrerelease,
 				validateExistingTarget: target.validateExistingTarget,
+				onProgress,
 			});
 			if (forceBinary && target.replacesSymlink) {
 				console.log(
@@ -2453,9 +2545,11 @@ export async function runUpdateCommand(opts: {
 		}
 		if (opts.channel) persistChannel(channel);
 	} catch (err) {
-		console.error(chalk.red(`Update failed: ${err}`));
-		process.exit(1);
+		throw updateError("Update failed", err);
+	} finally {
+		lock.release();
 	}
+	return { kind: "installed", version: release.version };
 }
 
 /**

@@ -232,12 +232,16 @@ function createAgentSessionHarness(
 		},
 		hasQueuedMessages: () => false,
 		metadataForProvider: () => ({}),
+		addBeforeModelCallHook: () => () => undefined,
 	}) as unknown as Agent;
 	const sessionManager = createNoopProxy({
 		getBranch: () => branchEntries,
+		getBranchView: () => branchEntries,
+		getSessionId: () => "session-wait-compaction",
 		getEntries: () => branchEntries,
 		getSessionFile: () => undefined,
 		getCredentialPins: () => [],
+		getUsageStatistics: () => ({ cost: 0 }),
 		appendMessage: (message: AgentMessage) => {
 			branchEntries.push({
 				type: "message",
@@ -294,6 +298,8 @@ function createAgentSessionHarness(
 			authStorage: createNoopProxy<AuthStorage>({}),
 			getAvailable: () => options.models ?? (options.model ? [options.model] : [model]),
 			getApiKey: async () => "test-api-key",
+			drainConfigWarnings: () => [],
+			fitContextWindow: (candidate: Model) => candidate,
 		}),
 		extensionRunner,
 		persistInitialMCPToolSelection: false,

@@ -67,6 +67,7 @@ function makeGuestContext(): InteractiveModeContext {
 			},
 		},
 		statusContainer: { clear: () => {} },
+		pendingShellContainer: { clear: () => {} },
 		pendingMessagesContainer: { clear: () => {} },
 		compactionQueuedMessages: [],
 		streamingComponent: undefined,
@@ -105,6 +106,9 @@ function makeGuestContext(): InteractiveModeContext {
 			const registry = getRunningSubagentBadgeRegistry(ctx.collabGuest, AgentRegistry.global());
 			const agentIds = getRunningSubagentBadgeAgentIds(registry);
 			ctx.statusLine.setRunningSubagents(agentIds);
+		},
+		setCollabGuest: (guest: InteractiveModeContext["collabGuest"]) => {
+			Object.assign(ctx, { collabGuest: guest });
 		},
 	} as unknown as InteractiveModeContext;
 	return ctx;

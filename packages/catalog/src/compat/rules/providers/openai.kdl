@@ -4,6 +4,9 @@ provider "openai" {
 	default-model "gpt-5.5"
 	env "OPENAI_API_KEY"
 	image-count-budget 200
+	on-api "openai-responses" {
+		supports-websockets #true
+	}
 	kind-apis {
 		embedding "openai-embeddings"
 		image "openai-responses"
@@ -217,10 +220,11 @@ provider "openai" {
 			cache-write 25.0
 		}
 	}
-	// GPT-6 Sol and Luna use the same >272K whole-request multipliers as Astra.
-	// Derive the tier from each API card so upstream price changes carry through.
+	// GPT-6 Sol, GPT-6 Luna, and GPT-6.1 Terra use the same >272K whole-request
+	// multipliers as Astra. Derive the tier from each API card so upstream price
+	// changes carry through.
 	// Fork: keep the `*` globs so dated/suffixed Sol/Luna ids keep the long-context tier.
-	models "gpt-6-sol*" "gpt-6-luna*" {
+	models "gpt-6-sol*" "gpt-6-luna*" "gpt-6.1-terra" {
 		long-context-cost {
 			input-threshold 272000
 			multiplier 2.0

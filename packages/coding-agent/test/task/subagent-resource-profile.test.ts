@@ -20,6 +20,7 @@ import * as taskExecutor from "../../src/task/executor";
 import type { AgentDefinition, SingleResult, TaskParams } from "../../src/task/types";
 import type { ToolSession } from "../../src/tools";
 import { EventBus } from "../../src/utils/event-bus";
+import { createSessionDefaults } from "../helpers/session-defaults";
 
 type StructuredCustomMessagePayload<T = unknown> = Partial<
 	Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">
@@ -58,6 +59,7 @@ function createYieldingSession(onCustomMessage?: (message: CapturedCustomMessage
 	};
 
 	return {
+		...createSessionDefaults(),
 		state,
 		agent: { state: { systemPrompt: ["test"] } },
 		model: undefined,

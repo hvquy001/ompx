@@ -36,6 +36,13 @@ import type {
 	UserMessageLink,
 	UserMessageStats,
 } from "./types";
+import {
+	emptySpotlightRows,
+	emptySpotlightState,
+	SpotlightCollector,
+	type SpotlightParseRows,
+	type SpotlightParserState,
+} from "./spotlight-ingest";
 import { computeUserMessageMetrics, judgeProse } from "./user-metrics";
 
 /** Basename of an advisor agent's transcript inside a session artifacts dir. */
@@ -671,6 +678,13 @@ function sanitizeToolName(name: string): string | null {
 	return candidate.length > 0 ? candidate : null;
 }
 
+/** A call the agent loop skipped carries a synthetic `executed: false` result: it never ran, so it is no tool error. */
+function isToolExecutionError(message: { isError?: unknown; details?: unknown }): boolean {
+	if (message.isError !== true) return false;
+	const details = message.details as { __synthetic?: unknown; executed?: unknown } | null | undefined;
+	return !(details?.__synthetic === true && details.executed === false);
+}
+
 /**
  * Build the result linkage for a `toolResult` entry: text characters fed back
  * into context plus the error flag, keyed to the originating call.
@@ -690,7 +704,7 @@ function extractToolResultLink(sessionFile: string, entry: SessionMessageEntry):
 		sessionFile,
 		toolCallId: msg.toolCallId,
 		resultChars,
-		isError: msg.isError === true,
+		isError: isToolExecutionError(msg),
 	};
 }
 
@@ -738,10 +752,12 @@ export function parseAllSessionEntries(bytes: Uint8Array): SessionEntry[] {
 	return entries;
 }
 
-function scanLastServiceTier(bytes: Uint8Array): ServiceTierByFamily | undefined {
+/** Rebuild the cursor state of `bytes` (a transcript prefix): the last service tier and the Spotlight state. */
+function scanPrefixState(bytes: Uint8Array, spotlight: SpotlightCollector): ServiceTierByFamily | undefined {
 	let currentServiceTier: ServiceTierByFamily | undefined;
 	visitSessionEntriesLenient(bytes, entry => {
 		if (isServiceTierChange(entry)) currentServiceTier = coerceServiceTierByFamily(entry.serviceTier);
+		else spotlight.visit(entry);
 	});
 	return currentServiceTier;
 }
@@ -755,6 +771,8 @@ export interface SessionParserState {
 	mtimeMs: number;
 	checkpoint: string;
 	serviceTier: ServiceTierByFamily | null;
+	/** Absent in cursors persisted before the Spotlight tables; such a tail parse starts from an empty state. */
+	spotlight?: SpotlightParserState;
 }
 
 export interface ParseSessionResult {
@@ -767,6 +785,7 @@ export interface ParseSessionResult {
 	toolResults: ToolResultLink[];
 	subagentRuns: SubagentRunStats[];
 	timeBudgetEntries: TimeBudgetEntryStats[];
+	spotlight: SpotlightParseRows;
 	newOffset: number;
 	parserState?: SessionParserState;
 	reset?: boolean;
@@ -819,9 +838,13 @@ export async function parseSessionFile(
 	// Reminders resolve their model from the parent assistant turn, which always
 	// precedes them; keep only the fields they read, not the message bodies.
 	const assistantByEntryId = new Map<string, ReminderParent>();
+	// First call per id: the row `INSERT OR IGNORE` keeps, so it can be written with its result.
+	const callsById = new Map<string, ToolCallStats>();
+	let spotlight = new SpotlightCollector(sessionPath, folder, emptySpotlightState());
 
 	// Reduce each entry immediately so full replays do not retain tool-output/message bodies.
 	const visit = (entry: SessionEntry): void => {
+		spotlight.visit(entry);
 		if (isServiceTierChange(entry)) {
 			currentServiceTier = coerceServiceTierByFamily(entry.serviceTier);
 			return;
@@ -849,7 +872,13 @@ export async function parseSessionFile(
 		}
 		if (isToolResultMessage(entry)) {
 			const link = extractToolResultLink(sessionPath, entry);
-			if (link) toolResults.push(link);
+			if (!link) return;
+			toolResults.push(link);
+			const call = callsById.get(link.toolCallId);
+			if (call && call.resultChars === undefined) {
+				call.resultChars = link.resultChars;
+				call.isError = link.isError;
+			}
 			return;
 		}
 		if (isModelUsage(entry)) {
@@ -860,7 +889,10 @@ export async function parseSessionFile(
 		if (isAssistantMessage(entry)) {
 			const msgStats = extractStats(sessionPath, folder, entry, currentServiceTier, agentType);
 			if (msgStats) stats.push(msgStats);
-			toolCalls.push(...extractToolCalls(sessionPath, folder, entry, agentType));
+			for (const call of extractToolCalls(sessionPath, folder, entry, agentType)) {
+				toolCalls.push(call);
+				if (!callsById.has(call.toolCallId)) callsById.set(call.toolCallId, call);
+			}
 			// Persist links even when the user entry was ingested in an earlier tail read.
 			const parentId = entry.parentId;
 			const msg = entry.message;
@@ -905,9 +937,14 @@ export async function parseSessionFile(
 			start = reset || replay ? 0 : Math.max(0, fromOffset);
 			const readStart = resume ? start : 0;
 			bytes = await file.slice(readStart, info.size).bytes();
-			currentServiceTier = resume
-				? (state?.serviceTier ?? undefined)
-				: scanLastServiceTier(bytes.subarray(0, start));
+			if (resume) {
+				currentServiceTier = state?.serviceTier ?? undefined;
+				spotlight = new SpotlightCollector(sessionPath, folder, state?.spotlight ?? emptySpotlightState());
+			} else {
+				const prefix = new SpotlightCollector(sessionPath, folder, emptySpotlightState(), false);
+				currentServiceTier = scanPrefixState(bytes.subarray(0, start), prefix);
+				spotlight = new SpotlightCollector(sessionPath, folder, prefix.state);
+			}
 			read = visitSessionEntriesLenient(bytes.subarray(start - readStart), visit);
 			const newOffset = start + read;
 			const checkpointStart = Math.max(0, newOffset - CHECKPOINT_BYTES);
@@ -931,12 +968,14 @@ export async function parseSessionFile(
 				toolResults: [],
 				subagentRuns: [],
 				timeBudgetEntries: [],
+				spotlight: emptySpotlightRows(),
 				newOffset: fromOffset,
 			};
 		}
 		throw err;
 	}
 
+	await spotlight.finish();
 	const newOffset = start + read;
 	return {
 		stats,
@@ -948,6 +987,7 @@ export async function parseSessionFile(
 		toolResults,
 		subagentRuns,
 		timeBudgetEntries,
+		spotlight: spotlight.rows,
 		newOffset,
 		reset,
 		parserState: {
@@ -960,6 +1000,7 @@ export async function parseSessionFile(
 			mtimeMs: info.mtimeMs,
 			checkpoint,
 			serviceTier: currentServiceTier ?? null,
+			spotlight: spotlight.state,
 		},
 	};
 }

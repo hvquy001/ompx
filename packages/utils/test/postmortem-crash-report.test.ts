@@ -14,7 +14,7 @@ describe("postmortem crash reports", () => {
 		try {
 			await Bun.write(
 				probePath,
-				`import "${postmortemModuleUrl}";\nPromise.reject(new Error("crash-report-probe"));\nawait Promise.resolve();\n`,
+				`import { installProcessHandlers } from "${postmortemModuleUrl}";\ninstallProcessHandlers();\nPromise.reject(new Error("crash-report-probe"));\nawait Promise.resolve();\n`,
 			);
 			await mkdir(join(stateHome, "omp"), { recursive: true });
 			await Bun.write(join(stateHome, "omp", ".keep"), "");

@@ -37,7 +37,12 @@ it("prints the requested answer without continuing stale todos in print mode", a
 			streamFn: model.stream,
 		}),
 		sessionManager,
-		settings: Settings.isolated({ "compaction.enabled": false, "todo.enabled": true, "todo.reminders": true }),
+		settings: Settings.isolated({
+			"compaction.enabled": false,
+			"todo.enabled": true,
+			"todo.reminders": true,
+			"autonomy.stopGate": false,
+		}),
 		modelRegistry: new ModelRegistry(auth, path.join(dir.path(), "models.yml")),
 	});
 	try {

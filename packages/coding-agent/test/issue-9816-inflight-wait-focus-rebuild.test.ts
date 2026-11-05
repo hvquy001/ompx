@@ -248,6 +248,7 @@ function makeSession(
 		sessionManager: {
 			getCwd: () => process.cwd(),
 			getEntries: () => messages,
+			getConversationTip: () => undefined,
 		},
 	};
 

@@ -177,6 +177,7 @@ export function streamGitLabDuo(
 									: undefined,
 								reasoning: anthropicReasoningEffort,
 								toolChoice: mapAnthropicToolChoice(options.toolChoice),
+								waitForTerminalDrain: options.waitForTerminalDrain,
 							},
 						)
 					: route.api === "openai-responses"

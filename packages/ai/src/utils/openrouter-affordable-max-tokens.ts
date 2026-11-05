@@ -56,6 +56,9 @@ export function withOpenRouterAffordableMaxTokensRetry<M, O extends OpenRouterAf
 		for (let retry = 0; ; retry++) {
 			const inner = attempt(model, context, attemptOptions);
 			const buffered: AssistantMessageEvent[] = [];
+			// The 402 surfaces before any output: only the `start` marker can precede it. The first
+			// other event commits the attempt and restores live streaming (no further retry).
+			let committed = false;
 			let terminal: AssistantMessageEvent | undefined;
 			const flush = (): void => {
 				for (const event of buffered) outer.push(event);
@@ -67,7 +70,14 @@ export function withOpenRouterAffordableMaxTokensRetry<M, O extends OpenRouterAf
 						terminal = event;
 						break;
 					}
-					buffered.push(event);
+					if (!committed && event.type === "start") {
+						buffered.push(event);
+						continue;
+					}
+					committed = true;
+					flush();
+					outer.push(event);
+					if (outer.done) return;
 				}
 			} catch (error) {
 				flush();
@@ -76,7 +86,7 @@ export function withOpenRouterAffordableMaxTokensRetry<M, O extends OpenRouterAf
 			}
 
 			const affordable =
-				retry === 0 && !options?.signal?.aborted && terminal?.type === "error"
+				retry === 0 && !committed && !options?.signal?.aborted && terminal?.type === "error"
 					? shouldRetryWithAffordableBudget(terminal, attemptOptions)
 					: undefined;
 			if (affordable !== undefined) {

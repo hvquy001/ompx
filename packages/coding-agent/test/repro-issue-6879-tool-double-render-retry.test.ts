@@ -56,7 +56,7 @@ function countCommand(mode: InteractiveMode): number {
 	let count = 0;
 	let index = 0;
 	while (true) {
-		const found = rendered.indexOf(`$ ${CMD}`, index);
+		const found = rendered.indexOf(CMD, index);
 		if (found === -1) return count;
 		count++;
 		index = found + CMD.length;

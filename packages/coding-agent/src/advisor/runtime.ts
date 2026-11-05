@@ -133,6 +133,13 @@ export interface AdvisorRuntimeHost {
 	duoWorkPhase?(): string | undefined;
 	/** Advisor gate policy; absent means never defer. */
 	advisorGate?(): { enabled: boolean; reviewThreshold: number };
+	/**
+	 * Whether primary assistant thinking blocks (`_thinking:_`) are included in
+	 * deltas rendered for this advisor. Defaults to `true`. Setting `false`
+	 * runs the advisor in evidence-only mode (actions, tool I/O, and outputs
+	 * without the primary model's chain-of-thought).
+	 */
+	includeReasoning?: boolean;
 }
 
 /** A request rejection that no retry can correct for this advisor configuration. */
@@ -493,8 +500,9 @@ export class AdvisorRuntime {
 	 * terminal turn ends the cascade, or on reset, so a later refusal starts fresh.
 	 */
 	readonly #refusalModelsTried = new Set<string>();
+	readonly #configuredIncludeThinking: boolean;
 	/** Whether primary reasoning is included in advisor deltas for the current model. */
-	#includeThinking = true;
+	#includeThinking: boolean;
 	#modelIdentity: string | undefined;
 	/** Completed 3-failure backlog-drop cycles since the last success/reset. */
 	#droppedBacklogs = 0;
@@ -526,9 +534,9 @@ export class AdvisorRuntime {
 	 *  being retried/requeued into the post-reset conversation. */
 	#epoch = 0;
 	disposed = false;
-	/** Quota/rate-limit pause state. When `true`, the advisor stops processing
-	 *  turns and drops new deltas until an explicit {@link reset} clears it
-	 *  (triggered by `/new`, config rebuild, or session restart). There is no
+	/** Quota/usage-limit pause state. When `true`, the advisor stops processing
+	 *  turns and drops new deltas until a {@link reset} clears it (compaction,
+	 *  image drop, shake, session switch, rebuild, or restart). There is no
 	 *  timer-based auto-resume: provider quota windows (5h/7d) are far longer
 	 *  than any reasonable timer, and premature retries waste calls and
 	 *  re-trigger the same error. */
@@ -540,6 +548,8 @@ export class AdvisorRuntime {
 		private readonly retryDelayMs = 1000,
 		options: AdvisorRuntimeOptions = {},
 	) {
+		this.#configuredIncludeThinking = host.includeReasoning !== false;
+		this.#includeThinking = this.#configuredIncludeThinking;
 		this.#primaryModel = agent.model;
 		this.#fallbackModel = options.fallbackModel;
 		this.#escalationModel = options.escalationModel;
@@ -1047,7 +1057,6 @@ export class AdvisorRuntime {
 	/** Clear only the advisor's private conversation. Primary cursor and queued
 	 * deltas stay intact so maintenance/overflow recovery never replays history. */
 	#clearAdvisorContextAtCurrentCursor(): void {
-		this.#consecutiveFailures = 0;
 		this.#failureNotified = false;
 		this.#invalidateRenderedContext();
 		try {
@@ -1238,7 +1247,7 @@ export class AdvisorRuntime {
 		const identity = this.host.getModelIdentity?.();
 		if (identity === undefined || identity === this.#modelIdentity) return;
 		this.#modelIdentity = identity;
-		this.#includeThinking = true;
+		this.#includeThinking = this.#configuredIncludeThinking;
 	}
 
 	#renderPendingDelta(messages: AgentMessage[], turns: number, wip: boolean): PendingDelta | null {
@@ -1760,6 +1769,8 @@ export class AdvisorRuntime {
 					// queue, backlog, waiters, and epoch stay intact. Re-render this
 					// collected raw batch against the cleared advisor-context dedupe
 					// state so active plan/goal rules are restored exactly once.
+					// A maintenance re-prime is not a recovery: the batch keeps its strikes, or a batch that
+					// keeps failing and keeps triggering maintenance is retried without end instead of dropped.
 					this.#clearAdvisorContextAtCurrentCursor();
 					deltaPart = this.#formatRawDelta(rawMessages, wip) ?? deltasText;
 					finalTurns = turnsCovered;
@@ -2020,7 +2031,10 @@ export class AdvisorRuntime {
 					if (classifierRefusal && this.#includeThinking) {
 						this.#includeThinking = false;
 						const strippedBatch = this.#formatRawDelta(rawMessages, wip);
-						if (strippedBatch) {
+						// Stripping only recovers when it changes what was sent: a batch
+						// resent byte-for-byte would be refused again, so it goes straight
+						// to the model fallback below.
+						if (strippedBatch && strippedBatch !== deltaPart) {
 							requeue(strippedBatch);
 							logger.debug("advisor refusal recovered by stripping primary reasoning");
 							continue;
@@ -2159,6 +2173,7 @@ export class AdvisorRuntime {
 						}
 						success = true;
 					} else if (contextOverflow) {
+						this.#consecutiveFailures = 0;
 						this.#clearAdvisorContextAtCurrentCursor();
 						if (contextWasFresh) {
 							logger.warn("advisor update overflowed a fresh context; dropping bounded batch");

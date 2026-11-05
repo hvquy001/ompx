@@ -14,6 +14,7 @@ describe("InputController tool output expansion", () => {
 		const ctx = {
 			toolOutputExpanded: false,
 			chatContainer: { children: [expandable, inert] },
+			pendingShellContainer: { children: [] },
 			ui: { requestRender },
 			showStatus,
 		} as unknown as InteractiveModeContext;

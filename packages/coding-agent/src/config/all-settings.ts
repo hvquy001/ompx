@@ -52,6 +52,8 @@ import * as streamSettings from "../stream/settings";
 import * as commitSettings from "../commit/settings";
 import * as cliGcSettings from "../cli/gc-settings";
 import * as telemetrySettings from "../telemetry-settings";
+import * as spotlightSettings from "../spotlight/settings";
+
 const DOMAINS: readonly Readonly<Record<string, unknown>>[] = [
 	configModelSettings,
 	modesSettings,
@@ -99,6 +101,7 @@ const DOMAINS: readonly Readonly<Record<string, unknown>>[] = [
 	streamSettings,
 	commitSettings,
 	cliGcSettings,
+	spotlightSettings,
 ];
 
 /** Domains listed immediately before `before` (a setting of a DOMAINS entry) instead of in DOMAINS order. */

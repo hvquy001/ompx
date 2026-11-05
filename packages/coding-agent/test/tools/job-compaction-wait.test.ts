@@ -128,6 +128,7 @@ function createAgentSession(manager: AsyncJobManager): AgentSession {
 		getEntries: () => [] as SessionEntry[],
 		getSessionFile: () => undefined,
 		getCredentialPins: () => [],
+		getUsageStatistics: () => ({ cost: 0 }),
 		buildSessionContext: () => ({
 			messages: agent.state.messages,
 			systemPrompt: [],

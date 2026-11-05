@@ -4,6 +4,11 @@ import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config
 import { AssistantMessageComponent, resetThinkingSpeedTracker } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { setTerminalImageProtocol, TERMINAL } from "@oh-my-pi/pi-tui";
+import {
+	DEFAULT_SPINNER_INTERVAL_MS,
+	setSpinnerInterval,
+	SPINNER_INTERVAL_STATIC,
+} from "@oh-my-pi/pi-tui/spinner-clock";
 
 const originalImageProtocol = TERMINAL.imageProtocol;
 
@@ -294,6 +299,22 @@ describe("AssistantMessageComponent streaming thinking pulse", () => {
 		expect(plain).toMatch(/thought for 5s/);
 		expect(plain).not.toMatch(/thought for 35s/);
 		component.dispose();
+	});
+
+	it("holds the pulse on its first facet while spinners are static (tui.motion: none)", () => {
+		vi.useFakeTimers({ now: 0 });
+		setSpinnerInterval(SPINNER_INTERVAL_STATIC);
+		const component = new AssistantMessageComponent(undefined, true);
+		try {
+			component.updateContent(streaming([{ type: "thinking", thinking: "private reasoning" }]));
+			vi.advanceTimersByTime(5_000);
+			expect(Bun.stripANSI(component.render(RENDER_WIDTH).join("\n"))).toContain(`${PULSE} ${THINKING_LABEL}`);
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			component.dispose();
+			setSpinnerInterval(DEFAULT_SPINNER_INTERVAL_MS);
+			vi.useRealTimers();
+		}
 	});
 
 	it("drops the pulse once visible text starts streaming", () => {

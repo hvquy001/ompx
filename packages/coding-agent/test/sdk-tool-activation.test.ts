@@ -33,6 +33,7 @@ import { VIBE_TOOL_NAMES } from "@oh-my-pi/pi-coding-agent/tools/vibe";
 import { resetYieldTurnState } from "@oh-my-pi/pi-coding-agent/tools/yield";
 import { logger, removeSyncWithRetries, Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
 import { SYSTEM_CONTEXT_REMINDER_LABEL } from "@oh-my-pi/system-context-reminder-plugin";
+import { jevAvailable } from "../src/jev/systemone";
 import { getBundledAgent } from "../src/task/agents";
 
 import { cfgExternalThinking } from "@oh-my-pi/pi-coding-agent/session/settings";
@@ -217,7 +218,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(write).toBeDefined();
 			await expect(
 				write!.execute("device-only-fs", { path: path.join(tempDir, "nope.txt"), content: "x" }),
-			).rejects.toThrow("Filesystem writes are not available");
+			).rejects.toThrow("Other filesystem paths are refused");
 		} finally {
 			await session.dispose();
 		}
@@ -240,7 +241,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 					path: path.join(tempDir, "before.txt"),
 					content: "x",
 				}),
-			).rejects.toThrow("Filesystem writes are not available");
+			).rejects.toThrow("Other filesystem paths are refused");
 
 			await session.setActiveToolsByName(session.getEnabledToolNames());
 
@@ -249,7 +250,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 					path: path.join(tempDir, "after.txt"),
 					content: "x",
 				}),
-			).rejects.toThrow("Filesystem writes are not available");
+			).rejects.toThrow("Other filesystem paths are refused");
 		} finally {
 			await session.dispose();
 		}
@@ -541,7 +542,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			if (!write) throw new Error("expected dormant write transport");
 			await expect(
 				write.execute("late-device-fs", { path: path.join(tempDir, "nope.txt"), content: "x" }),
-			).rejects.toThrow("Filesystem writes are not available");
+			).rejects.toThrow("Other filesystem paths are refused");
 		} finally {
 			await session.dispose();
 		}
@@ -1726,7 +1727,8 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				"grep",
 				"glob",
 				"codegraph_explore",
-				"jev_scout",
+				// `jev_scout` is only built while a System One endpoint is configured.
+				...(jevAvailable() ? ["jev_scout"] : []),
 				"bash",
 				"web_search",
 				// `yield` is no longer part of the agent's declared tools; the task
@@ -2293,7 +2295,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(write).toBeDefined();
 			await expect(
 				write!.execute("device-only-fs", { path: path.join(tempDir, "nope.txt"), content: "x" }),
-			).rejects.toThrow("Filesystem writes are not available");
+			).rejects.toThrow("Other filesystem paths are refused");
 		} finally {
 			await session.dispose();
 		}
@@ -2370,6 +2372,38 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				expect(session.getToolByName(name)).toBeUndefined();
 			}
 			expect(session.getActiveToolNames()).toEqual(previousActiveToolNames);
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("keeps MCP refreshes out of the vibe director toolset and applies them on exit", async () => {
+		const tempDir = makeTempDir();
+		const { session } = await createAgentSession(baseOptions(tempDir));
+		const previousEnabledToolNames = session.getEnabledToolNames();
+		const mcpTool = {
+			name: "mcp__vibe_refresh_lookup",
+			label: "vibe_refresh/lookup",
+			description: "MCP tool connected while vibe mode is active.",
+			parameters: type({}),
+			mcpServerName: "vibe_refresh",
+			mcpToolName: "lookup",
+			async execute() {
+				return { content: [{ type: "text", text: "mcp" }] };
+			},
+		} satisfies CustomTool;
+
+		try {
+			await session.activateVibeTools(["read"]);
+			const directorToolNames = session.getEnabledToolNames();
+			await session.refreshMCPTools([mcpTool]);
+			expect(session.getToolByName(mcpTool.name)).toBeDefined();
+			expect(session.getEnabledToolNames()).toEqual(directorToolNames);
+
+			await session.deactivateVibeTools(previousEnabledToolNames);
+			expect(session.getEnabledToolNames()).toEqual(
+				expect.arrayContaining([...previousEnabledToolNames, mcpTool.name]),
+			);
 		} finally {
 			await session.dispose();
 		}

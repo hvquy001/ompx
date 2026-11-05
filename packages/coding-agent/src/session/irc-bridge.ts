@@ -1,5 +1,5 @@
 import type { Agent, AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import { isRecord, logger, prompt } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
 import { IrcBus } from "../irc/bus";
 import { type IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
@@ -16,6 +16,15 @@ import { cfgTaskJevAssist } from "../task/settings";
 import { cfgAsyncEnabled } from "../tools/settings";
 
 export type IrcWakeFailureHandler = (message: IrcMessage) => void | Promise<void>;
+
+/** Narrows {@link IrcBridge.drainInboxMessages}. */
+export interface IrcInboxDrainOptions {
+	ifAny?: (msg: IrcMessage) => boolean;
+	/** Only take messages from this agent. */
+	from?: string;
+	/** Take at most this many, oldest first. */
+	limit?: number;
+}
 
 /** Capabilities the IRC bridge borrows from its owning session. */
 export interface IrcBridgeHost {
@@ -34,13 +43,20 @@ export interface IrcBridgeHost {
 export class IrcBridge {
 	/** Tracks parent IRC steers by object identity without trusting prompt text or publication on receipt. */
 	readonly #parentSteers = new WeakSet<AgentMessage>();
+	/** A subagent's records from anyone but its parent: answered in their own turn, never by
+	 *  extending a finished one (whose text is the subagent's result). */
+	readonly #peerMessages = new WeakSet<AgentMessage>();
+	/** Queued broadcast legs and progress notes: they ask nothing of the recipient, so they
+	 *  inject at the next step boundary like any record but never cut a `wait` short. */
+	readonly #quietRecords = new WeakSet<AgentMessage>();
 
 	readonly #host: IrcBridgeHost;
 	#interrupts: AgentMessage[] = [];
 	#asides: AgentMessage[] = [];
-	/** Wake-intended records parked while a pooled yield contract owns the worker.
-	 *  Pooled turns must not flush these (no observer would reply to the sender);
-	 *  they resume into a monitored wake once the contract clears. */
+	/** Wake-intended records parked while a pooled yield contract owns the worker or a
+	 *  driven run holds wakes (`AgentSession.holdIrcWakes`). Turns must not flush these
+	 *  (no observer would reply to the sender); they resume into a monitored wake once
+	 *  the contract clears or the hold is released. */
 	#deferredWakes: AgentMessage[] = [];
 	/** In-flight wake-turn relays owed to peers. */
 	readonly #pendingReplies = new Set<Promise<void>>();
@@ -54,9 +70,14 @@ export class IrcBridge {
 		return this.#parentSteers.has(message);
 	}
 
-	/** Whether an incoming peer message can interrupt a wait. */
+	/** Whether `record` came to a subagent from anyone but its parent, or as a broadcast leg. */
+	isPeerMessage(record: AgentMessage): boolean {
+		return this.#peerMessages.has(record);
+	}
+
+	/** Whether an incoming message can interrupt a wait: anything queued but a broadcast or progress note. */
 	hasInterrupts(): boolean {
-		return this.#interrupts.length > 0;
+		return this.#interrupts.some(record => !this.#quietRecords.has(record));
 	}
 
 	/** Whether an aside is ready for step-boundary injection (not a parked wake). */
@@ -67,6 +88,32 @@ export class IrcBridge {
 	/** Whether any undelivered IRC record remains queued. */
 	hasPending(): boolean {
 		return this.#interrupts.length > 0 || this.#asides.length > 0 || this.#deferredWakes.length > 0;
+	}
+
+	/** Whether an IRC message from `from` is still queued for a turn yet to run. */
+	hasQueuedFrom(from: string): boolean {
+		return [this.#interrupts, this.#asides, this.#deferredWakes].some(queue =>
+			queue.some(
+				record =>
+					record.role === "custom" &&
+					record.customType === "irc:incoming" &&
+					isRecord(record.details) &&
+					record.details.from === from,
+			),
+		);
+	}
+
+	/** Distinct senders with an IRC message still queued for a turn yet to run (see {@link hasQueuedFrom}). */
+	queuedSenders(): string[] {
+		const senders = new Set<string>();
+		for (const queue of [this.#interrupts, this.#asides, this.#deferredWakes]) {
+			for (const record of queue) {
+				if (record.role !== "custom" || record.customType !== "irc:incoming" || !isRecord(record.details)) continue;
+				const from = record.details.from;
+				if (typeof from === "string") senders.add(from);
+			}
+		}
+		return [...senders];
 	}
 
 	/** Waits until every in-flight wake-turn relay has settled. */
@@ -82,8 +129,16 @@ export class IrcBridge {
 		void pending.finally(() => this.#pendingReplies.delete(pending));
 	}
 
-	/** Takes every queued IRC record in interrupt-before-aside order. */
-	drainPending(): AgentMessage[] {
+	/** Takes queued IRC records in interrupt-before-aside order; `keepPeerMessages` leaves a
+	 *  subagent's non-parent messages queued for their own wake turn. */
+	drainPending(options?: { keepPeerMessages?: boolean }): AgentMessage[] {
+		if (options?.keepPeerMessages) {
+			const isPeer = (record: AgentMessage) => this.isPeerMessage(record);
+			const records = [...this.#interrupts, ...this.#asides].filter(record => !isPeer(record));
+			this.#interrupts = this.#interrupts.filter(isPeer);
+			this.#asides = this.#asides.filter(isPeer);
+			return records;
+		}
 		const records = [...this.#interrupts, ...this.#asides];
 		this.#interrupts = [];
 		this.#asides = [];
@@ -140,8 +195,10 @@ export class IrcBridge {
 		return records;
 	}
 
-	/** Surfaces and consumes queued incoming records before automatic injection. */
-	drainInboxMessages(agentId: string, opts?: { from?: string; limit?: number }): IrcMessage[] {
+	/** Surfaces and consumes queued incoming records before automatic injection; `from` and `limit`
+	 *  narrow what is taken (the rest stays queued), and with `ifAny`, nothing is taken unless at
+	 *  least one of them satisfies it. */
+	drainInboxMessages(agentId: string, opts?: IrcInboxDrainOptions): IrcMessage[] {
 		const messages: IrcMessage[] = [];
 		const remainingInterrupts: AgentMessage[] = [];
 		const remainingAsides: AgentMessage[] = [];
@@ -169,6 +226,7 @@ export class IrcBridge {
 				const body = Reflect.get(details, "message");
 				const replyTo = Reflect.get(details, "replyTo");
 				const broadcast = Reflect.get(details, "broadcast") === true;
+				const progress = Reflect.get(details, "progress") === true;
 				if (typeof id !== "string" || typeof from !== "string" || typeof body !== "string") {
 					queue.remaining.push(record);
 					continue;
@@ -189,9 +247,11 @@ export class IrcBridge {
 					ts: record.timestamp,
 					...(typeof replyTo === "string" ? { replyTo } : {}),
 					...(broadcast ? { broadcast: true } : {}),
+					...(progress ? { progress: true } : {}),
 				});
 			}
 		}
+		if (opts?.ifAny && !messages.some(opts.ifAny)) return [];
 		this.#interrupts = remainingInterrupts;
 		this.#asides = remainingAsides;
 		return messages;
@@ -207,13 +267,41 @@ export class IrcBridge {
 		const planModeIdle = !streaming && this.#host.planModeEnabled();
 		const autoReply =
 			(opts?.expectsReply ?? false) && ((streaming && !cfgAsyncEnabled.get(this.#host.settings)) || planModeIdle);
-		const fromParent = AgentRegistry.global().get(msg.to)?.parentId === msg.from;
+		const registry = AgentRegistry.global();
+		const parentId = registry.get(msg.to)?.parentId;
+		const fromParent = parentId === msg.from;
+		// A subagent's result answers its parent, and its run may be waiting on its
+		// own descendants, whose questions it must see in-run. Anyone else's
+		// message, or a broadcast leg (which asks no one in particular), gets a
+		// turn of its own.
+		let fromDescendant = false;
+		const seen = new Set<string>();
+		for (
+			let id = registry.get(msg.from)?.parentId;
+			id !== undefined && !seen.has(id);
+			id = registry.get(id)?.parentId
+		) {
+			if (id === msg.to) {
+				fromDescendant = true;
+				break;
+			}
+			seen.add(id);
+		}
+		const peerMessage = parentId !== undefined && (msg.broadcast === true || (!fromParent && !fromDescendant));
 		// An idle subagent runs a monitored wake turn whose output is relayed
 		// back to the sender (task executor `relayWakeTurnOutput`); the main
-		// agent, mid-turn asides, relays and broadcast legs have no such relay.
+		// agent, mid-turn asides, relays, broadcast legs and progress notes have no such relay.
 		const relayOnStop =
-			!streaming && !planModeIdle && msg.to !== MAIN_AGENT_ID && msg.wakeRelay !== true && msg.broadcast !== true;
-		const childToMain = msg.to === MAIN_AGENT_ID && AgentRegistry.global().get(msg.from)?.parentId === msg.to;
+			!streaming &&
+			!planModeIdle &&
+			msg.to !== MAIN_AGENT_ID &&
+			msg.wakeRelay !== true &&
+			msg.broadcast !== true &&
+			msg.progress !== true;
+		// A broadcast leg or progress note asks nothing of the recipient, so a
+		// busy one reads it at its next step boundary without being interrupted.
+		const quiet = msg.broadcast === true || msg.progress === true;
+		const childToMain = msg.to === MAIN_AGENT_ID && registry.get(msg.from)?.parentId === msg.to;
 		let triage: string | undefined;
 		if (childToMain && cfgTaskJevAssist.get(this.#host.settings)) {
 			try {
@@ -235,7 +323,8 @@ export class IrcBridge {
 				autoReplied: autoReply,
 				message: envelopeBody,
 				replyTo: msg.replyTo ?? "",
-				interrupting: streaming,
+				progress: msg.progress === true,
+				interrupting: streaming && !quiet,
 				relayOnStop,
 				triage,
 				triageStatus: triage === "status",
@@ -248,14 +337,16 @@ export class IrcBridge {
 				...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
 				...(msg.wakeRelay ? { wakeRelay: true } : {}),
 				...(msg.broadcast ? { broadcast: true } : {}),
+				...(msg.progress ? { progress: true } : {}),
 				...(fromParent ? { fromParent: true } : {}),
 			},
 			attribution: "agent",
 			timestamp: msg.ts,
 		};
+		if (peerMessage) this.#peerMessages.add(record);
 		void this.#host.emitSessionEvent({ type: "irc_message", message: record });
 		if (streaming) {
-			if (fromParent) {
+			if (fromParent && !peerMessage) {
 				const steer: AgentMessage = {
 					role: "user",
 					content: prompt.render(parentIrcSteerTemplate, {
@@ -268,10 +359,10 @@ export class IrcBridge {
 					timestamp: msg.ts,
 					steering: true,
 				};
-				// A broadcast leg asks no one in particular: consuming it never makes the turn the parent's.
-				if (msg.broadcast !== true) this.#parentSteers.add(steer);
+				this.#parentSteers.add(steer);
 				this.#host.agent.steer(steer);
 			} else {
+				if (quiet) this.#quietRecords.add(record);
 				this.#interrupts.push(record);
 			}
 			if (autoReply) this.#startAutoReply(msg);

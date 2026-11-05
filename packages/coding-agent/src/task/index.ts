@@ -17,7 +17,8 @@ import { taskSubprocessRenderer } from "@oh-my-pi/pi-tui/tools/subprocess";
  *   - Session artifacts for debugging
  */
 import "../cli/preload-env";
-import path from "node:path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type {
 	AgentTool,
 	AgentToolResult,
@@ -25,11 +26,11 @@ import type {
 	ToolSpeculationPolicy,
 } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
-import { $env, logger, prompt } from "@oh-my-pi/pi-utils";
+import { $env, isRecord, logger, prompt, sanitizeText } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "..";
 import type { EffectiveExtensionRoots } from "../capability/types";
+import type { Settings } from "../config/settings";
 import type { Theme } from "@oh-my-pi/pi-tui/theme";
-import subagentUserPromptTemplate from "../prompts/system/subagent-user-prompt.md" with { type: "text" };
 import taskDescriptionTemplate from "../prompts/tools/task.md" with { type: "text" };
 import taskAsyncContractTemplate from "../prompts/tools/task-async-contract.md" with { type: "text" };
 import taskCoordinationAdvisoryTemplate from "../prompts/tools/task-coordination-advisory.md" with { type: "text" };
@@ -52,24 +53,24 @@ import { SEANCE_AGENT_NAME } from "./seance-policy";
 import { escapeHarnessTags } from "../session/harness-tags";
 import {
 	type AgentDefinition,
-	type AgentProgress,
 	canSpawnAtDepth,
 	getTaskSchema,
-	type SingleResult,
-	type TaskItem,
-	type TaskParams,
-	type TaskToolDetails,
+	MAX_TASK_FILE_BYTES,
 	type TaskToolSchemaInstance,
 } from "./types";
+import type { AgentProgress, SingleResult, TaskItem, TaskParams, TaskToolDetails } from "@oh-my-pi/pi-tui/tools/task";
 
 // Import review tools for side effects (registers subagent tool handlers)
 import "../tools/review";
-import { AsyncJobError, type AsyncJobManager } from "../async";
+import { AsyncJobError, type AsyncJobManagerApi } from "../async";
 import { hasResolvableTranscript } from "../internal-urls/registry-helpers";
+import { sessionResolveContext } from "../internal-urls/context";
+import { InternalUrlRouter } from "../internal-urls/router";
 import { AgentRegistry, isResumable } from "../registry/agent-registry";
 import type { DiscoveryResult } from "./discovery";
 import * as taskDiscovery from "./discovery";
 import { createEvalCustomTools, describeEvalTools, evalToolsEnabled } from "./eval-tools";
+import { getPerCallModelAdvertisement, type PerCallModelAdvertisement } from "./model-approval";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
 import { mapWithConcurrencyLimitAllSettled, Semaphore } from "./parallel";
@@ -77,6 +78,8 @@ import { renderResult, renderCall as renderTaskCall } from "@oh-my-pi/pi-tui/too
 import { repairTaskParams } from "@oh-my-pi/pi-tui/tools/task-repair-args";
 import { resolveMaxRuntimeMs } from "./runtime-cap";
 import {
+	invalidModelSelectorReason,
+	renderSubagentUserPrompt,
 	resolveEffectiveSubagentPolicy,
 	runStructuredSubagent,
 	StructuredSubagentError,
@@ -96,6 +99,7 @@ import {
 	cfgTaskDisabledAgents,
 	cfgTaskEnableEffort,
 	cfgTaskEnableLsp,
+	cfgTaskFile,
 	cfgTaskIsolationApply,
 	cfgTaskIsolationEnabled,
 	cfgTaskJevAssist,
@@ -104,12 +108,8 @@ import {
 	cfgTaskMaxRuntimeMs,
 	cfgTaskSpeculativeLaunch,
 	cfgTaskStructured,
+	perCallModelEnabled,
 } from "./settings";
-function renderSubagentUserPrompt(assignment: string): string {
-	return prompt.render(subagentUserPromptTemplate, {
-		assignment: assignment.trim(),
-	});
-}
 function appendBriefGaps(
 	result: AgentToolResult<TaskToolDetails>,
 	assessments: BriefAssessment[],
@@ -197,8 +197,11 @@ interface TaskDescriptionOptions {
 	disabledAgents: string[];
 	batchEnabled: boolean;
 	effortEnabled: boolean;
+	perCallModelEnabled: boolean;
+	perCallModelAdvertisement?: PerCallModelAdvertisement;
 	evalToolsEnabled: boolean;
 	structured: boolean;
+	file: boolean;
 	asyncEnabled: boolean;
 	ircEnabled: boolean;
 	planMode: boolean;
@@ -247,8 +250,11 @@ function renderDescription(options: TaskDescriptionOptions): string {
 		applyIsolatedChanges: options.applyIsolatedChanges,
 		batchEnabled: options.batchEnabled,
 		effortEnabled: options.effortEnabled,
+		perCallModelEnabled: options.perCallModelEnabled,
+		perCallModelAdvertisement: options.perCallModelAdvertisement,
 		evalToolsEnabled: options.evalToolsEnabled,
 		structured: options.structured,
+		file: options.file,
 		asyncEnabled: options.asyncEnabled,
 		hasBlockingAgents: renderedAgents.some(agent => agent.blocking),
 		hasStructuredAgents: renderedAgents.some(agent => agent.structured),
@@ -341,58 +347,81 @@ function validateShapeParams(batchEnabled: boolean, params: TaskParams): string 
 	return undefined;
 }
 
-/**
- * Validate the spawn parameter contract against the wire shapes. With
- * `task.batch` the model-facing shape is `{ context, tasks[] }` — `tasks`
- * non-empty with per-item `task` instructions and unique names, `context`
- * non-empty, no top-level `task` alongside. The flat `{ agent?, ...item }`
- * form stays accepted at runtime under either setting (internal callers, stale
- * transcripts). Missing `agent` values resolve against the session spawn
- * policy later, in `spawnParamsFor`. Returns a problem description, or
- * undefined when valid.
- */
-function hasInvalidModelSelector(model: unknown): boolean {
-	if (model === undefined) return false;
-	const selectors = typeof model === "string" ? [model] : Array.isArray(model) ? model : undefined;
-	const materializedSelectors = selectors ? Array.from(selectors) : [];
-	return (
-		!selectors ||
-		materializedSelectors.length === 0 ||
-		materializedSelectors.some(
-			selector => typeof selector !== "string" || !selector.split(",").some(pattern => pattern.trim()),
-		)
-	);
-}
-
 /** Reject an out-of-range `effort` selector on internal/stale-transcript calls that bypass the wire schema. */
 function validateEffort(effort: TaskEffort | undefined, label: string): string | undefined {
 	if (effort === undefined || TASK_EFFORTS.includes(effort)) return undefined;
 	return `${label} has an invalid \`effort\` value ${JSON.stringify(effort)}. Use "lo", "med", or "hi".`;
 }
 
-function validateSpawnParams(params: TaskParams, batchEnabled: boolean): string | undefined {
-	const hasTask = typeof params.task === "string" && params.task.trim() !== "";
-	const hasLegacyAssignment = typeof params.assignment === "string" && params.assignment.trim() !== "";
+function validateTaskInput(item: TaskItem | undefined, label: string, fileEnabled: boolean): string | undefined {
+	// `assignment` is the legacy fork alias for `task`.
+	const taskText = item?.task ?? item?.assignment;
+	const hasTask = taskText !== undefined;
+	const hasTaskFile = item?.taskFile !== undefined;
+	if (!fileEnabled) {
+		if (typeof taskText !== "string" || taskText.trim() === "") {
+			return label === "The call"
+				? "Missing `task`. Provide complete, self-contained instructions for the agent."
+				: `${label} is missing \`task\`. Every task needs complete, self-contained instructions.`;
+		}
+		return undefined;
+	}
+	if (hasTask === hasTaskFile) {
+		return `${label} must provide exactly one of \`task\` or \`taskFile\`.`;
+	}
+	if (hasTask && (typeof taskText !== "string" || taskText.trim() === "")) {
+		return `${label} needs non-empty, self-contained \`task\` instructions.`;
+	}
+	if (
+		hasTaskFile &&
+		(typeof item?.taskFile !== "string" || (!path.isAbsolute(item.taskFile) && !item.taskFile.startsWith("local://")))
+	) {
+		return `${label} \`taskFile\` must be an absolute path or local:// URL to a UTF-8 file.`;
+	}
+	return undefined;
+}
+
+/**
+ * Validate the spawn parameter contract against the wire shapes. With
+ * `task.batch` the model-facing shape is `{ context, tasks[] }` — `tasks`
+ * non-empty with one task source per item and unique names, `context`
+ * non-empty, no top-level `task` or `taskFile` alongside. The flat `{ agent?, ...item }`
+ * form stays accepted at runtime under either setting (internal callers, stale
+ * transcripts). Missing `agent` values resolve against the session spawn
+ * policy later, in `spawnParamsFor`. Returns a problem description, or
+ * undefined when valid.
+ */
+function validateSpawnParams(
+	params: TaskParams,
+	batchEnabled: boolean,
+	fileEnabled: boolean,
+	defaultAgent: string,
+	settings: Settings,
+): string | undefined {
 	const tasks = params.tasks;
+	if (
+		!fileEnabled &&
+		(params.taskFile !== undefined || (Array.isArray(tasks) && tasks.some(item => item?.taskFile !== undefined)))
+	) {
+		return "task.file is disabled, so the task tool does not accept `taskFile`.";
+	}
 	if (batchEnabled && tasks !== undefined) {
 		if (!Array.isArray(tasks) || tasks.length === 0) {
-			return "Missing `tasks`. Provide at least one task item ({ name?, agent?, task }).";
+			return "Missing `tasks`. Provide at least one task item with `task` or `taskFile`.";
 		}
-		if (hasTask || hasLegacyAssignment) {
-			return "Top-level `task` is not part of the batch shape. Put the work in `tasks[]` items.";
+		if (params.task !== undefined || params.taskFile !== undefined || params.assignment !== undefined) {
+			return "Top-level `task` or `taskFile` is not part of the batch shape. Put the work in `tasks[]` items.";
 		}
 		for (let i = 0; i < tasks.length; i++) {
 			const item = tasks[i];
-			const itemTask = item?.task ?? item?.assignment;
-			if (!item || typeof itemTask !== "string" || itemTask.trim() === "") {
-				const label = item?.name ?? item?.id;
-				return `Task ${i + 1}${label ? ` (\`${label}\`)` : ""} is missing \`task\`. Every task needs complete, self-contained instructions.`;
-			}
-			if (hasInvalidModelSelector(item.model)) {
-				return `Task ${i + 1}${item.name ? ` (\`${item.name}\`)` : ""} has an invalid \`model\`. Provide a non-empty selector or a non-empty array of non-empty selectors.`;
-			}
-			const effortError = validateEffort(item.effort, `Task ${i + 1}${item.name ? ` (\`${item.name}\`)` : ""}`);
+			const itemName = item?.name ?? item?.id;
+			const label = `Task ${i + 1}${itemName ? ` (\`${itemName}\`)` : ""}`;
+			const inputError = validateTaskInput(item, label, fileEnabled);
+			if (inputError) return inputError;
+			const effortError = validateEffort(item.effort, label);
 			if (effortError) return effortError;
+			const modelError = validateModel(item, label, defaultAgent, settings);
+			if (modelError) return modelError;
 		}
 		const seen = new Map<string, string>();
 		for (const item of tasks) {
@@ -407,21 +436,44 @@ function validateSpawnParams(params: TaskParams, batchEnabled: boolean): string 
 		}
 		// New agent-centric calls require shared context. Legacy fork callers
 		// retain their historically optional context while they migrate.
-		const usesAgentCentricItems = tasks.some(item => typeof item.task === "string");
+		const usesAgentCentricItems = tasks.some(
+			item => typeof item.task === "string" || typeof item.taskFile === "string",
+		);
 		if (usesAgentCentricItems && (typeof params.context !== "string" || params.context.trim() === "")) {
 			return "Missing `context`. Provide the shared background for this batch — goal, constraints, and any contract the tasks share.";
 		}
 		return undefined;
 	}
-	if (!hasTask && !hasLegacyAssignment) {
-		return batchEnabled
-			? "Missing `tasks`. Provide a `tasks` array (one subagent per item) with a shared `context`."
-			: "Missing `task`. Provide complete, self-contained instructions for the agent.";
+	if (batchEnabled && params.task === undefined && params.taskFile === undefined && params.assignment === undefined) {
+		return "Missing `tasks`. Provide a `tasks` array (one subagent per item) with a shared `context`.";
 	}
-	if (hasInvalidModelSelector(params.model)) {
-		return "Invalid `model`. Provide a non-empty selector or a non-empty array of non-empty selectors.";
-	}
-	return validateEffort(params.effort, "The call");
+	return (
+		validateTaskInput(params, "The call", fileEnabled) ??
+		validateEffort(params.effort, "The call") ??
+		validateModel(params, "The call", defaultAgent, settings)
+	);
+}
+
+/**
+ * A `model` on a call naming `seance` is checked at preflight, once the name resolves:
+ * the bundled seance takes it as its source-session override, a shadowing agent as a per-call model.
+ */
+function validateModel(
+	item: TaskItem | TaskParams,
+	label: string,
+	defaultAgent: string,
+	settings: Settings,
+): string | undefined {
+	return (item.agent?.trim() || defaultAgent) === SEANCE_AGENT_NAME
+		? undefined
+		: invalidModelSelectorReason(item.model, label, { settings, invocationKind: "task" });
+}
+
+function spawnModelFields(params: TaskParams): Pick<StructuredSubagentRequest, "perCallModel" | "seanceModel"> {
+	if (params.model === undefined) return {};
+	if (params.agent === SEANCE_AGENT_NAME) return { seanceModel: params.model };
+	// `validateModel` rejected anything but one string before dispatch.
+	return typeof params.model === "string" ? { perCallModel: params.model } : {};
 }
 /**
  * Convert the model-facing seconds value once at the executor boundary.
@@ -453,9 +505,9 @@ function resolveSpawnItems(params: TaskParams): TaskItem[] {
 		name: params.name ?? params.id,
 		agent: params.agent,
 		task: params.task ?? params.assignment,
+		taskFile: params.taskFile,
 		description: params.description,
 		role: params.role,
-		model: params.model,
 	};
 	if ("solutionSpace" in params) item.solutionSpace = params.solutionSpace;
 	if ("outputSchema" in params) item.outputSchema = params.outputSchema;
@@ -466,7 +518,54 @@ function resolveSpawnItems(params: TaskParams): TaskItem[] {
 	if ("max_runtime_seconds" in params) item.max_runtime_seconds = params.max_runtime_seconds;
 	if ("self_review" in params) item.self_review = params.self_review;
 	if ("sourceSession" in params) item.sourceSession = params.sourceSession;
+	if ("model" in params) item.model = params.model;
 	return [item];
+}
+
+interface ResolvedTaskItem extends TaskItem {
+	taskFileSha256?: string;
+}
+
+interface SpawnParams extends TaskParams {
+	taskFileSha256?: string;
+}
+
+/** The filesystem path a `taskFile` names; approval and dispatch share it so both see the same file. */
+function taskFilePath(session: ToolSession, taskFile: string): string | undefined {
+	return taskFile.startsWith("local://")
+		? InternalUrlRouter.instance().locateSync(taskFile, sessionResolveContext(session))
+		: taskFile;
+}
+
+async function resolveTaskFile(session: ToolSession, item: TaskItem): Promise<ResolvedTaskItem> {
+	if (item.taskFile === undefined) return item;
+	try {
+		const filePath = taskFilePath(session, item.taskFile);
+		if (filePath === undefined) throw new Error("does not resolve to a local file");
+		// On POSIX, a non-blocking open lets fstat reject a FIFO without waiting for a writer.
+		const file = await fs.open(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+		try {
+			if (!(await file.stat()).isFile()) throw new Error("must resolve to a regular file");
+			const bytes = await Bun.file(file.fd)
+				.slice(0, MAX_TASK_FILE_BYTES + 1)
+				.bytes();
+			if (bytes.byteLength > MAX_TASK_FILE_BYTES) throw new Error("exceeds the 4 MiB limit");
+			let task: string;
+			try {
+				task = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+			} catch {
+				throw new Error("contains invalid UTF-8");
+			}
+			if (!task.trim()) throw new Error("must contain non-empty task instructions");
+			return { ...item, task, taskFileSha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex") };
+		} finally {
+			await file.close();
+		}
+	} catch (error) {
+		throw new Error(
+			`taskFile ${JSON.stringify(item.taskFile)}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 /**
@@ -478,17 +577,17 @@ function resolveSpawnItems(params: TaskParams): TaskItem[] {
  * distinguishes an absent `isolated` from an explicit one. The item's
  * `isolated` (batch form) wins over the top-level flag (flat form).
  */
-function spawnParamsFor(params: TaskParams, item: TaskItem, defaultAgent: string): TaskParams {
+function spawnParamsFor(params: TaskParams, item: ResolvedTaskItem, defaultAgent: string): SpawnParams {
 	// Undefined fields stay absent: speculative launches compare spawns as canonical JSON.
-	const spawn: TaskParams = { agent: item.agent?.trim() || params.agent?.trim() || defaultAgent };
+	const spawn: SpawnParams = { agent: item.agent?.trim() || params.agent?.trim() || defaultAgent };
 	const name = item.name ?? item.id;
 	if (name !== undefined) spawn.name = name;
 	const task = item.task ?? item.assignment;
 	if (task !== undefined) spawn.task = task;
+	if (item.taskFile !== undefined) spawn.taskFile = item.taskFile;
+	if (item.taskFileSha256 !== undefined) spawn.taskFileSha256 = item.taskFileSha256;
 	if (item.description !== undefined) spawn.description = item.description;
 	if (item.role !== undefined) spawn.role = item.role;
-	const model = item.model ?? params.model;
-	if (model !== undefined) spawn.model = model;
 	if (item.max_runtime_seconds !== undefined) {
 		spawn.max_runtime_seconds = item.max_runtime_seconds;
 	} else if (params.max_runtime_seconds !== undefined) {
@@ -530,13 +629,15 @@ interface SpawnPlan {
 function planSpawns(
 	rawParams: unknown,
 	batchEnabled: boolean,
+	fileEnabled: boolean,
 	defaultAgent: string,
 	seanceAdvertised: boolean,
+	settings: Settings,
 ): SpawnPlan | string {
 	const params = repairTaskParams(rawParams as TaskParams);
 	const error =
 		validateShapeParams(batchEnabled, params) ??
-		validateSpawnParams(params, batchEnabled) ??
+		validateSpawnParams(params, batchEnabled, fileEnabled, defaultAgent, settings) ??
 		validateSeanceParams({ params, batchEnabled, defaultAgent, seanceAdvertised });
 	if (error) return error;
 	const items = resolveSpawnItems(params);
@@ -548,7 +649,7 @@ function planSpawns(
  * calls) a pre-claimed agent id, and a run already started speculatively.
  */
 interface SyncSpawnRef {
-	item: TaskItem;
+	item: ResolvedTaskItem;
 	index: number;
 	run?: SpawnRun;
 	preAllocatedId?: string;
@@ -800,6 +901,15 @@ interface DelegationRateLimitBlock {
 export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetails, Theme> {
 	readonly name = "task";
 	readonly approval = "exec" as const;
+	// Restricted folders cover task files, but approvals are never remembered per file: the grant would
+	// cover whatever the path holds later, and inline items in the same batch.
+	readonly approvalRestrictionPaths = (args: unknown): readonly string[] | undefined => {
+		if (!isRecord(args)) return undefined;
+		const items = Array.isArray(args.tasks) ? args.tasks : [args];
+		return items.flatMap(item =>
+			isRecord(item) && typeof item.taskFile === "string" ? (taskFilePath(this.session, item.taskFile) ?? []) : [],
+		);
+	};
 	readonly formatApprovalDetails = (args: unknown): string[] => {
 		const params = args as Partial<TaskParams>;
 		const lines: string[] = [];
@@ -813,6 +923,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (model) lines.push(`Model: ${model}`);
 		if (typeof params.task === "string") {
 			lines.push(`Task:\n${truncateForPrompt(params.task)}`);
+		}
+		if (typeof params.taskFile === "string") {
+			lines.push(`Task file: ${truncateForPrompt(sanitizeText(JSON.stringify(params.taskFile)))}`);
 		}
 		if (typeof params.context === "string" && params.context.trim()) {
 			lines.push(`Context:\n${truncateForPrompt(params.context)}`);
@@ -841,10 +954,15 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					lines.push(`Name: ${truncateForPrompt(firstTask.name)}`);
 				}
 				lines.push(`Agent: ${truncateForPrompt(effectiveAgent(firstTask))}`);
-				const itemModel = formatModelForApproval("model" in firstTask ? firstTask.model : undefined);
-				if (itemModel) lines.push(`Model: ${itemModel}`);
 				if ("task" in firstTask && typeof firstTask.task === "string") {
 					lines.push(`Task:\n${truncateForPrompt(firstTask.task)}`);
+				}
+			}
+			for (const [index, item] of tasks.entries()) {
+				const itemModel = isRecord(item) ? formatModelForApproval(item.model) : undefined;
+				if (itemModel) lines.push(`Task ${index + 1} model: ${itemModel}`);
+				if (isRecord(item) && typeof item.taskFile === "string") {
+					lines.push(`Task ${index + 1} file: ${truncateForPrompt(sanitizeText(JSON.stringify(item.taskFile)))}`);
 				}
 			}
 			if (tasks.length > 1) {
@@ -859,9 +977,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	readonly loadMode = "essential";
 	// Arktype validates model calls against the active wire schema, but the flat
 	// single-spawn schema carries `"+": "delete"`: a batch `{ context, tasks[] }`
-	// payload has those keys stripped, then fails on the now-missing `task` with
-	// the misleading `task must be a string (was missing)`. That preempts the
-	// tool's own actionable shape checks (`validateShapeParams` /
+	// payload has those keys stripped, then can fail on a missing flat-form field.
+	// That preempts the tool's own actionable shape checks (`validateShapeParams` /
 	// `validateSpawnParams`), which never run. Lenient validation forwards the
 	// raw args to `execute()` on any arktype failure so those checks surface the
 	// real reason ("enable task.batch, or use the flat `task` shape"). Valid
@@ -896,8 +1013,10 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			const plan = planSpawns(
 				args,
 				this.#isBatchEnabled(),
+				cfgTaskFile.get(this.session.settings),
 				this.#defaultAgent(),
 				this.#seanceSchemaFields() !== undefined,
+				this.session.settings,
 			);
 			return typeof plan === "string" ? undefined : plan.spawns;
 		},
@@ -937,6 +1056,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			effortEnabled: cfgTaskEnableEffort.get(this.session.settings),
 			evalToolsEnabled: evalToolsEnabled(this.session),
 			structured: this.#isStructured(),
+			file: cfgTaskFile.get(this.session.settings),
 			defaultAgent: this.#defaultAgent(),
 			seanceFields: this.#seanceSchemaFields(),
 		});
@@ -964,6 +1084,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		const sessionAgents = this.session.advertisedSessionAgents?.() ?? this.session.getSessionAgents?.() ?? [];
 		const planMode = this.session.getPlanModeState?.()?.enabled === true;
 		const isolationEnabled = cfgTaskIsolationEnabled.get(this.session.settings);
+		const perCallModel = perCallModelEnabled(this.session.settings, "task");
 		return renderDescription({
 			agents,
 			sessionAgents,
@@ -972,8 +1093,17 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			disabledAgents,
 			batchEnabled: this.#isBatchEnabled(),
 			effortEnabled: cfgTaskEnableEffort.get(this.session.settings),
+			perCallModelEnabled: perCallModel,
+			perCallModelAdvertisement: perCallModel
+				? getPerCallModelAdvertisement(
+						this.session.settings,
+						this.session.getActiveModel?.(),
+						this.session.modelRegistry,
+					)
+				: undefined,
 			evalToolsEnabled: evalToolsEnabled(this.session),
 			structured: this.#isStructured(),
+			file: cfgTaskFile.get(this.session.settings),
 			asyncEnabled: cfgAsyncEnabled.get(this.session.settings),
 			ircEnabled: isIrcEnabled(this.session.settings, this.session.taskDepth ?? 0),
 			planMode,
@@ -1130,7 +1260,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	/** Start one spawn's subagent run behind the session semaphore. */
 	#launch(spawn: {
 		toolCallId: string;
-		params: TaskParams;
+		params: SpawnParams;
 		index: number;
 		agentId?: string;
 		detached: boolean;
@@ -1165,6 +1295,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		index: number,
 		signal: AbortSignal,
 	): Promise<SpawnRun | undefined> {
+		// File bytes must be captured at dispatch, not while arguments stream.
+		if (spawn.taskFile !== undefined) return undefined;
 		if (spawn.tools?.length && this.session.getPlanModeState?.()?.enabled === true) return undefined;
 		let blocking: boolean;
 		try {
@@ -1207,7 +1339,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			context: this.#isBatchEnabled() ? params.context?.trim() || undefined : undefined,
 			agent: params.agent,
 			sourceSession: params.sourceSession,
-			model: params.model,
+			...spawnModelFields(params),
 			...this.#resultParams(params),
 			...this.#effortParams(params),
 			...("isolated" in params ? { isolation: { requested: params.isolated } } : {}),
@@ -1276,7 +1408,14 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		const spawnPolicy = resolveSpawnPolicy(this.session.getSessionSpawns());
 		const defaultAgent = this.#defaultAgent();
 		const batchEnabled = this.#isBatchEnabled();
-		const plan = planSpawns(rawParams, batchEnabled, defaultAgent, this.#seanceSchemaFields() !== undefined);
+		const plan = planSpawns(
+			rawParams,
+			batchEnabled,
+			cfgTaskFile.get(this.session.settings),
+			defaultAgent,
+			this.#seanceSchemaFields() !== undefined,
+			this.session.settings,
+		);
 		if (typeof plan === "string") {
 			return createTaskModeError(plan);
 		}
@@ -1287,8 +1426,14 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				details: { projectAgentsDir: null, results: [], totalDurationMs: 0 },
 			};
 		}
-		const { params, items: spawnItems } = plan;
-		let normalizedSpawnParams = plan.spawns;
+		const { params } = plan;
+		const spawnItems: ResolvedTaskItem[] = [];
+		try {
+			for (const item of plan.items) spawnItems.push(await resolveTaskFile(this.session, item));
+		} catch (error) {
+			return createTaskModeError(error instanceof Error ? error.message : String(error));
+		}
+		let normalizedSpawnParams = spawnItems.map(item => spawnParamsFor(params, item, defaultAgent));
 		const evalToolNames = spawnItems.flatMap(item => item.tools ?? []);
 		if (evalToolNames.length > 0) {
 			if (this.session.getPlanModeState?.()?.enabled === true) {
@@ -1494,7 +1639,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		const callStartedAt = Date.now();
 		const spawns: Array<{
 			agentId: string;
-			item: TaskItem;
+			item: ResolvedTaskItem;
 			index: number;
 			blocking: boolean;
 			run: SpawnRun | undefined;
@@ -1523,6 +1668,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					status: "pending",
 					task: renderSubagentUserPrompt(assignment),
 					assignment,
+					...(item.taskFile !== undefined ? { taskFile: item.taskFile, taskFileSha256: item.taskFileSha256 } : {}),
 					recentTools: [],
 					recentOutput: [],
 					toolCount: 0,
@@ -1771,9 +1917,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	 * feeds the caller's aggregate counters.
 	 */
 	#registerSpawnJob(options: {
-		manager: AsyncJobManager;
+		manager: AsyncJobManagerApi;
 		toolCallId: string;
-		spawnParams: TaskParams;
+		spawnParams: SpawnParams;
 		agentId: string;
 		/** Run already started while the call streamed; the job adopts it instead of launching. */
 		run?: SpawnRun;
@@ -2136,7 +2282,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	/** Spawn a fresh subagent and run it to completion; the body of every {@link SpawnRun}. */
 	async #runSpawn(
 		toolCallId: string,
-		params: TaskParams,
+		params: SpawnParams,
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<TaskToolDetails>,
 		preAllocatedId?: string,
@@ -2148,6 +2294,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 	): Promise<AgentToolResult<TaskToolDetails>> {
 		const startTime = Date.now();
 		const assignment = (params.task ?? "").trim();
+		const taskFileMetadata =
+			params.taskFile !== undefined ? { taskFile: params.taskFile, taskFileSha256: params.taskFileSha256 } : {};
 		const context = this.#isBatchEnabled() ? params.context?.trim() || undefined : undefined;
 		let latestProgress: AgentProgress | undefined;
 		try {
@@ -2158,7 +2306,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				context,
 				agent: params.agent,
 				sourceSession: params.sourceSession,
-				model: params.model,
+				...spawnModelFields(params),
 				...this.#resultParams(params),
 				...this.#effortParams(params),
 				solutionSpace: params.solutionSpace,
@@ -2194,7 +2342,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				signal,
 				...(tools ? { onToolResult: (result: SubagentToolResult) => appendToolResult(tools, result) } : {}),
 				onProgress: progress => {
-					latestProgress = { ...progress, recentTools: progress.recentTools.slice() };
+					latestProgress = { ...progress, ...taskFileMetadata, recentTools: progress.recentTools.slice() };
 					this.#updateRateLimitBlockFromProgress(latestProgress);
 					onUpdate?.({
 						content: [{ type: "text", text: `Running agent ${progress.id}...` }],
@@ -2209,7 +2357,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			});
 			this.#updateRateLimitBlockFromResult(execution.result);
 			return await this.#buildResultPayload(
-				execution.result,
+				{ ...execution.result, ...taskFileMetadata },
 				execution.policy.discovery.projectAgentsDir,
 				Date.now() - startTime,
 				execution.mergeSummary,
@@ -2239,7 +2387,11 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			const settled = error instanceof StructuredSubagentError ? error.result : undefined;
 			const cause = error instanceof StructuredSubagentError ? error.cause : undefined;
 			const salvaged = settled
-				? { ...settled, error: settled.error ?? (cause instanceof Error ? cause.message : message) }
+				? {
+						...settled,
+						...taskFileMetadata,
+						error: settled.error ?? (cause instanceof Error ? cause.message : message),
+					}
 				: undefined;
 			return {
 				content: [

@@ -19,6 +19,7 @@ import { type AsyncJob, AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
+import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { createAgentsHubDeps } from "@oh-my-pi/pi-coding-agent/modes/agents-hub-deps";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -34,6 +35,7 @@ import {
 	type TaskParams,
 } from "@oh-my-pi/pi-coding-agent/task/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { WaitTool } from "@oh-my-pi/pi-coding-agent/tools/wait";
 import { snapshotJobs } from "@oh-my-pi/pi-coding-agent/async/job-control";
 import { cfgTaskAgentModelOverrides, cfgTaskMaxConcurrency } from "@oh-my-pi/pi-coding-agent/task/settings";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
@@ -158,6 +160,7 @@ describe("task spawn routing", () => {
 	beforeEach(() => {
 		AgentRegistry.resetGlobalForTests();
 		AgentLifecycleManager.resetGlobalForTests();
+		IrcBus.resetGlobalForTests();
 	});
 
 	afterEach(async () => {
@@ -167,6 +170,7 @@ describe("task spawn routing", () => {
 		}
 		AgentLifecycleManager.resetGlobalForTests();
 		AgentRegistry.resetGlobalForTests();
+		IrcBus.resetGlobalForTests();
 	});
 
 	it("accepts only nonnegative integer max_runtime_seconds values in the flat schema", () => {
@@ -266,9 +270,7 @@ describe("task spawn routing", () => {
 		});
 
 		const manager = createManager();
-		const tool = await TaskTool.create(
-			createSession({ manager, settings: { "task.agentModelOverrides": { task: "openai/gpt-4.1-mini" } } }),
-		);
+		const tool = await TaskTool.create(createSession({ manager, settings: { "task.perCallModel": "on" } }));
 
 		const result = await tool.execute("tc-spawn", {
 			agent: "task",
@@ -496,6 +498,58 @@ describe("task spawn routing", () => {
 			"frontend-ui-copy",
 			"repo-design-system",
 		]);
+	});
+
+	it("owes the parent no reply once the spawn job of the child it messaged has delivered", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [taskAgent], projectAgentsDir: null });
+		const gate = deferred();
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			await gate.promise;
+			return makeResult(options.id ?? "?", { output: "Mask path checked too." });
+		});
+		const manager = createManager();
+		const registry = AgentRegistry.global();
+		const parent = {
+			...createSession({ manager, settings: { "launch.enabled": false } }),
+			agentRegistry: registry,
+			getAgentId: () => "Main",
+		} as unknown as ToolSession;
+		registry.register({
+			id: "Main",
+			displayName: "Main",
+			kind: "main",
+			session: { isStreaming: true } as never,
+			status: "running",
+		});
+		const tool = await TaskTool.create(parent);
+		const spawned = await tool.execute("tc-ask", {
+			agent: "task",
+			name: "Spawnling",
+			task: "Check the mask.",
+		} as TaskParams);
+		const job = manager.getJob(spawned.details!.async!.jobId!)!;
+		// The child is mid-run when its parent sends it a follow-up.
+		const child = { isStreaming: true, deliverIrcMessage: async () => "injected" as const };
+		registry.register({
+			id: "Spawnling",
+			displayName: "Spawnling",
+			kind: "sub",
+			parentId: "Main",
+			session: child as never,
+		});
+		const receipt = await IrcBus.global().send({ from: "Main", to: "Spawnling", body: "check the mask path too" });
+		expect(receipt.outcome).toBe("injected");
+
+		const waiting = new WaitTool(parent).execute("wait-job", {});
+		child.isStreaming = false;
+		gate.resolve();
+		expect((await waiting).details?.jobs?.[0]).toMatchObject({ id: job.id, status: "completed" });
+
+		// The job carried the child's result: it did not end without replying, and nothing is owed.
+		const again = await new WaitTool(parent).execute("wait-again", {});
+		expect(again.content[0]).toMatchObject({
+			text: expect.stringContaining("no agent you messaged this run owes a reply"),
+		});
 	});
 
 	it("uses the persisted /agents model after replacing a session-only task selection", async () => {

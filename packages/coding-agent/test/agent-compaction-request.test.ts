@@ -82,7 +82,8 @@ describe("agent-requested compaction", () => {
 	function seedCompactableHistory(): void {
 		sessionManager.appendMessage({
 			role: "user",
-			content: [{ type: "text", text: "old request" }],
+			// Large enough that summarizing it shrinks the context; the reduction guard refuses a no-op compaction.
+			content: [{ type: "text", text: `old request ${"filler ".repeat(500)}` }],
 			timestamp: Date.now() - 4,
 		});
 		sessionManager.appendMessage({

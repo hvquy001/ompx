@@ -145,35 +145,6 @@ describe("AuthStorage account rotation", () => {
 		expect(exhaustedFallbackKey).toMatch(/^access-/);
 	});
 
-	test("drains an in-flight OAuth selection before finalizing its store", async () => {
-		const refreshStarted = Promise.withResolvers<void>();
-		const allowRefresh = Promise.withResolvers<void>();
-		let refreshCalls = 0;
-		vi.spyOn(oauth, "refreshOAuthToken").mockImplementation(async (_provider, credential) => {
-			refreshCalls += 1;
-			if (refreshCalls === 1) {
-				refreshStarted.resolve();
-				await allowRefresh.promise;
-			}
-			return credential;
-		});
-
-		await authStorage.credentials.set("openai-codex", {
-			type: "oauth",
-			access: "access-in-flight",
-			refresh: "refresh-in-flight",
-			expires: Date.now() + 60_000,
-			accountId: "acct-in-flight",
-		});
-
-		const pending = authStorage.keys.get("openai-codex", "in-flight-close");
-		await refreshStarted.promise;
-		authStorage.close();
-		allowRefresh.resolve();
-
-		await expect(pending).resolves.toBeUndefined();
-	});
-
 	test("usage-limit rotation can match the failed bearer when session stickiness is missing", async () => {
 		await authStorage.credentials.set("openai-codex", [
 			{

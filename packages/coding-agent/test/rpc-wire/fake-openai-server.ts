@@ -16,7 +16,7 @@
  *   are mounted as devices)
  * - a user message containing `read_uri <url>` → a `read` call for `<url>`
  * - a user message containing `write_uri <url>` → a `write` call storing
- *   `written by model` at `<url>`
+ *   `written by model` at `<url>` (or the JSON value after `<url>`, if supplied)
  * - anything else → text `pong`
  */
 import * as path from "node:path";
@@ -41,15 +41,19 @@ function messageText(content: unknown): string {
 }
 
 function scriptedReply(request: ChatRequest): Reply {
-	const messages = request.messages ?? [];
+	// The OMPx system-context reminder is queued after a reply lacking the persona and rides behind the next
+	// user prompt as its own user message; the scripted reply keys off the prompt, not that trailing reminder.
+	const messages = (request.messages ?? []).filter(
+		message => !(message.role === "user" && messageText(message.content).startsWith("System context reminder:")),
+	);
 	const last = messages.at(-1);
 	if (last?.role === "tool") return { text: `tool said: ${messageText(last.content)}` };
 	const offered = new Set((request.tools ?? []).map(tool => tool.function?.name));
 	const userText = last?.role === "user" ? messageText(last.content) : "";
-	const uriRequest = /\b(read|write)_uri (\S+)/.exec(userText);
+	const uriRequest = /\b(read|write)_uri (\S+)(?: (\{[^\n]*\}))?/.exec(userText);
 	if (uriRequest?.[1] === "read") return { tool: "read", args: { path: uriRequest[2] } };
 	if (uriRequest?.[1] === "write") {
-		return { tool: "write", args: { path: uriRequest[2], content: "written by model" } };
+		return { tool: "write", args: { path: uriRequest[2], content: uriRequest[3] ?? "written by model" } };
 	}
 	if (userText.includes("echo_host")) {
 		const args = { message: "hello" };

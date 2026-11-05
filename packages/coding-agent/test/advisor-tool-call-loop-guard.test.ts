@@ -200,9 +200,10 @@ describe("advisor tool-call loop guard", () => {
 		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
 
 		// First threshold injects one corrective; ignoring it re-arms the
-		// detector, and the second threshold aborts. The agent loop observes the
-		// abort after one already-scheduled request, bounding twenty repeats at 7.
-		expect(contexts).toHaveLength(7);
+		// detector, and the second threshold aborts. The agent loop ends an aborted
+		// run before preparing its next model call (endAbortedBeforeModel), so no
+		// further request is scheduled: twenty repeats are bounded at 6.
+		expect(contexts).toHaveLength(6);
 		const delivered = JSON.stringify(contexts[3]!.messages);
 		expect(delivered).toContain("You called `read` 3 consecutive times");
 		expect(delivered).toContain("ENOENT: no such file or directory");

@@ -10,11 +10,15 @@ export type OrchestratorModeMarkdownWriteOptions = {
 const MARKDOWN_FILE_EXTENSION_RE = /\.md$/i;
 const AGENT_COORDINATION_TARGET_RE = /^agent:\/\/.+$/i;
 const PROC_JOB_KILL_TARGET_RE = /^proc:\/\/[^/]+\/kill$/i;
+// `conflict://` splices into a real file; its handler re-runs this guard on that file (tools/conflict-uri.ts),
+// so the URL itself is only a pointer and must not be judged as a write target.
+const CONFLICT_RESOLUTION_TARGET_RE = /^conflict:\/\/.+$/i;
 
 function assertMarkdownTarget(session: ToolSession, targetPath: string): void {
 	if (
 		AGENT_COORDINATION_TARGET_RE.test(targetPath) ||
 		PROC_JOB_KILL_TARGET_RE.test(targetPath) ||
+		CONFLICT_RESOLUTION_TARGET_RE.test(targetPath) ||
 		MARKDOWN_FILE_EXTENSION_RE.test(targetPath)
 	)
 		return;

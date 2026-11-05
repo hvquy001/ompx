@@ -17,6 +17,7 @@ import {
 	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
 } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { createSessionDefaults } from "../helpers/session-defaults";
 
 interface SessionHarness {
 	session: AgentSession;
@@ -74,6 +75,7 @@ function createSessionHarness(lastAssistantMessage?: AssistantMessage): SessionH
 	let disposed = false;
 
 	const session: Partial<AgentSession> = {
+		...createSessionDefaults(),
 		state: { messages: [] } as never,
 		agent: { state: { systemPrompt: ["test"] } } as never,
 		extensionRunner: undefined as never,

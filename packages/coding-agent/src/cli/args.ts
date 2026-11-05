@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { $env, APP_DISPLAY_NAME, APP_NAME, APP_TAGLINE, CONFIG_DIR_NAME, logger } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { DEFAULT_LINUX_PODMAN_IMAGE } from "../config/sandbox-defaults";
+import type { MotionMode } from "../config/motion-presets";
 import type { ServiceTierOpenAISettingValue } from "../config/service-tier";
 import type { ApprovalMode } from "../tools/approval";
 import { CLI_THINKING_LEVELS, type ConfiguredThinkingLevel, parseCliThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
@@ -44,6 +45,8 @@ export interface Args {
 	planYolo?: boolean;
 	planYoloInto?: string;
 	maxTime?: number;
+	warnCost?: number;
+	maxCost?: number;
 	apiKey?: string;
 	systemPrompt?: string;
 	systemPromptTemplate?: string;
@@ -93,7 +96,14 @@ export interface Args {
 	noSkills?: boolean;
 	skills?: string[];
 	noRules?: boolean;
+	noContextFiles?: boolean;
 	noTitle?: boolean;
+	/** `--spinner-interval <ms>`: ephemeral `tui.spinnerInterval` override for every spinner (0 = static). */
+	spinnerInterval?: number;
+	/** `--max-fps <n>`: ephemeral `tui.maxFps` override — the ceiling on how often the TUI repaints. */
+	maxFps?: number;
+	/** `--motion <full|reduced|none>`: ephemeral `tui.motion` override — one switch over every animation. */
+	motion?: MotionMode;
 	/** RPC modes only: run extensions without a UI; `rpc-ui` tool UI remains enabled. */
 	noUi?: boolean;
 	autoApprove?: boolean;
@@ -398,6 +408,8 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.noSkills = true;
 		} else if (arg === "--no-rules") {
 			result.noRules = true;
+		} else if (arg === "--no-context-files") {
+			result.noContextFiles = true;
 		} else if (arg === "--no-title") {
 			result.noTitle = true;
 		} else if (arg === "--no-ui") {

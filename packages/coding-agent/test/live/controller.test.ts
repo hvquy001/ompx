@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import {
 	LiveSessionController,
@@ -7,9 +7,14 @@ import {
 } from "../../src/live/controller";
 import type { LiveAgentEndpoint, LiveAgentIdentity, LiveMediaEndpoint } from "../../src/live/endpoints";
 import { LiveInputDeviceError } from "../../src/live/local-endpoints";
+import { OUTPUT_RELEASE_MS } from "../../src/live/output-activity";
 import { buildDelegationContextAppend, type LiveClientMessage, type LiveServerEvent } from "../../src/live/protocol";
 import type { LiveTransportOptions } from "../../src/live/transport";
 import type { LivePhase } from "@oh-my-pi/pi-tui/apps/live-visualizer";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 // Drain the queued microtasks that serialize the controller's send chain (no wall clock).
 const flush = async (): Promise<void> => {
@@ -193,7 +198,8 @@ describe("LiveSessionController", () => {
 		expect(h.terminals).toEqual([undefined]);
 	});
 
-	test("output level drives the speaking phase when no delegation is active", async () => {
+	test("output level drives the speaking phase until the release hold elapses when no delegation is active", async () => {
+		vi.useFakeTimers();
 		const h = makeHarness();
 		await h.controller.start();
 		expect(h.controller.phase).toBe("listening");
@@ -201,7 +207,11 @@ describe("LiveSessionController", () => {
 		h.media.emitOutputLevel(0.5);
 		expect(h.controller.phase).toBe("speaking");
 
+		// A quiet window alone does not end speech: pauses between words must not flip the phase.
 		h.media.emitOutputLevel(0);
+		expect(h.controller.phase).toBe("speaking");
+
+		vi.advanceTimersByTime(OUTPUT_RELEASE_MS);
 		expect(h.controller.phase).toBe("listening");
 	});
 

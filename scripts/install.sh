@@ -17,7 +17,7 @@ set -e
 REPO="qtnx/omppp"
 PACKAGE="@oh-my-pi/pi-coding-agent"
 INSTALL_DIR="${PI_INSTALL_DIR:-$HOME/.local/bin}"
-MIN_BUN_VERSION="1.3.14"
+MIN_BUN_VERSION="1.4.4"
 API_BASE_URL="${PI_GITHUB_API_BASE_URL:-https://api.github.com/repos/${REPO}}"
 RELEASE_DOWNLOAD_BASE_URL="${PI_RELEASE_DOWNLOAD_BASE_URL:-https://github.com/${REPO}/releases/download}"
 

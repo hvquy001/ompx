@@ -76,6 +76,7 @@ function createSessionHarness(): { session: AgentSession; steeringQueue: AgentMe
 		},
 		hasQueuedMessages: () => steeringQueue.length > 0 || followUpQueue.length > 0,
 		metadataForProvider: () => ({}),
+		addBeforeModelCallHook: () => () => undefined,
 	}) as unknown as Agent;
 	const sessionManager = createNoopProxy({
 		getCwd: () => "/tmp",
@@ -85,6 +86,7 @@ function createSessionHarness(): { session: AgentSession; steeringQueue: AgentMe
 		getBranch: () => [],
 		getEntries: () => [],
 		getCredentialPins: () => [],
+		getUsageStatistics: () => ({ cost: 0 }),
 		buildSessionContext: () => ({
 			messages: agentState.messages,
 			systemPrompt: [],
@@ -96,7 +98,7 @@ function createSessionHarness(): { session: AgentSession; steeringQueue: AgentMe
 		agent,
 		sessionManager,
 		settings: createSettings(),
-		modelRegistry: createNoopProxy<ModelRegistry>({ getAvailable: () => [model] }),
+		modelRegistry: createNoopProxy<ModelRegistry>({ getAvailable: () => [model], drainConfigWarnings: () => [] }),
 		persistInitialMCPToolSelection: false,
 	});
 	sessions.push(session);

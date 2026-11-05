@@ -4,22 +4,11 @@
  * the background that could inject a message and wake it again).
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import type { AgentSession, AgentSessionEvent } from "../../session/agent-session";
+import type { AgentSessionEvent } from "../../session/agent-session";
+import { isSessionSettled, type SessionSettleHost, waitForSessionSettlement } from "../../session/session-settle";
 import type { RpcSessionSettledFrame } from "./rpc-types";
 
-/** Session surface the settle predicate reads. */
-export type RpcSettleSession = Pick<
-	AgentSession,
-	"isStreaming" | "hasAdmittedSubmission" | "queuedMessageCount" | "hasPendingAsyncWork"
-> &
-	Partial<Pick<AgentSession, "passiveQueuedMessageCount">>;
-
-/** Queued messages that still owe the agent a turn: passive hidden context waits for the next prompt and does not count. */
-export function queuedWorkCount(
-	session: Pick<AgentSession, "queuedMessageCount"> & Partial<Pick<AgentSession, "passiveQueuedMessageCount">>,
-): number {
-	return session.queuedMessageCount - (session.passiveQueuedMessageCount ?? 0);
-}
+export { queuedWorkCount } from "../../session/session-settle";
 
 /**
  * Reports a turn the host side has decided to start but not yet admitted (for
@@ -43,21 +32,6 @@ export function watchedScheduledTurnProbe(
 	};
 }
 
-/**
- * True when no run is live, admitted or scheduled, no steer/follow-up is queued,
- * and no background job or delivery can re-wake the session. Backs
- * `session_settled`, `prompt_result.sessionSettled`, and `get_state.isSettled`.
- */
-export function isRpcSessionSettled(session: RpcSettleSession, scheduledTurn?: RpcScheduledTurnProbe): boolean {
-	return (
-		!session.isStreaming &&
-		!session.hasAdmittedSubmission &&
-		queuedWorkCount(session) === 0 &&
-		!session.hasPendingAsyncWork() &&
-		scheduledTurn?.() !== true
-	);
-}
-
 async function nextMacrotask(): Promise<void> {
 	const { promise, resolve } = Promise.withResolvers<void>();
 	setImmediate(resolve);
@@ -74,12 +48,12 @@ export class RpcSessionSettleWatcher {
 	#active = false;
 	#checking = false;
 	#recheck = false;
-	readonly #session: RpcSettleSession & Pick<AgentSession, "settleAsyncWork">;
+	readonly #session: SessionSettleHost;
 	readonly #output: (frame: RpcSessionSettledFrame) => void;
 	readonly #scheduledTurn: RpcScheduledTurnProbe | undefined;
 
 	constructor(
-		session: RpcSettleSession & Pick<AgentSession, "settleAsyncWork">,
+		session: SessionSettleHost,
 		output: (frame: RpcSessionSettledFrame) => void,
 		scheduledTurn?: RpcScheduledTurnProbe,
 	) {
@@ -119,11 +93,14 @@ export class RpcSessionSettleWatcher {
 				// after it, and session_settled must follow them.
 				await nextMacrotask();
 				await nextMacrotask();
-				while (this.#active && this.#canWaitOutBackgroundWork()) {
-					await this.#session.settleAsyncWork();
+				if (this.#active) {
+					await waitForSessionSettlement(this.#session, {
+						isCurrent: () => this.#active,
+						scheduledTurn: this.#scheduledTurn,
+					});
 				}
 			} while (this.#recheck);
-			if (!this.#active || !isRpcSessionSettled(this.#session, this.#scheduledTurn)) return;
+			if (!this.#active || !isSessionSettled(this.#session, this.#scheduledTurn)) return;
 			this.#active = false;
 			this.#output({ type: "session_settled" });
 		} catch (error) {
@@ -131,10 +108,5 @@ export class RpcSessionSettleWatcher {
 		} finally {
 			this.#checking = false;
 		}
-	}
-
-	#canWaitOutBackgroundWork(): boolean {
-		const session = this.#session;
-		return !session.isStreaming && !session.hasAdmittedSubmission && session.hasPendingAsyncWork();
 	}
 }

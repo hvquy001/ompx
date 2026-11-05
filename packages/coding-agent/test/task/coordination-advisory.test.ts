@@ -25,13 +25,13 @@ describe("buildCoordinationAdvisory", () => {
 });
 
 describe("subagent COOP irc guidance", () => {
-	it("prompts coordination before overlapping edits when peers are present", () => {
+	it("restricts peer messages to blockers and documents the per-file edit lock when peers are present", () => {
 		const out = prompt.render(subagentSystemPromptTemplate, {
 			agent: "Base worker.",
 			ircPeers: "- `Sib` — task (sub, running)",
 			ircSelfId: "Self",
 		});
-		expect(out).toContain("before editing a file a sibling may own");
+		expect(out).toContain('NEVER send FYI, progress, or "editing <file>" announcements.');
 		expect(out).toContain("same-file `edit`/`write` calls");
 	});
 });
