@@ -306,6 +306,8 @@ Rejected, with measurements, so nobody re-litigates them: **sccache** (cannot ca
 
 Compile a standalone binary with `bun --cwd=packages/coding-agent run build` → `packages/coding-agent/dist/ompx`. To replace a globally linked dev `ompx`, overwrite the launcher at its real path (e.g. `~/.bun/bin/ompx`) with a copy of `dist/ompx` (`bun link` installs a symlink to `src/cli.ts`; replacing the file with the compiled binary is a clean cutover, reversible by re-linking).
 
+`bun run install:binary` (`scripts/install-local-binary.ts`) does the whole flow: syncs dependencies, downloads the `engines.bun` runtime when the local `bun` is older, builds and smoke-tests `dist/ompx` (rebuilding the native on a stale sentinel), then installs it over the `ompx` on PATH. When that `ompx` is a symlink to a prebuilt binary, the build is stored beside it as `ompx-<branch>-<sha>` and the link is repointed; pass `--target <path>` to install elsewhere or `--native` to force a native rebuild.
+
 **Native sentinel gotcha.** The binary embeds the prebuilt native addon from `packages/natives/native/*.node` (via `embed-native.ts`). If that `.node` predates the current crate, the compiled binary fails at startup with `does not expose the @oh-my-pi/pi-natives@<ver> version sentinel __piNativesV<ver>`. Fix: rebuild the native first (`bun --cwd=packages/natives run build`), then rebuild the binary. The runtime extracts the embedded `.node` to `~/.omp/natives/<version>/`; a stale file there is loaded in preference and blocks re-extraction, so delete `~/.omp/natives/<version>` after rebuilding. Validate with `dist/ompx --version && dist/ompx --smoke-test`.
 
 ## Testing Guidance
