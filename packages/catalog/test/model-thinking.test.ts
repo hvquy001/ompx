@@ -870,6 +870,20 @@ describe("model thinking derivation", () => {
 		expect(direct.compat.supportsTurnScopedSystem).toBe(true);
 	});
 
+	// Without the controls a prefix edit 400s first, then retries with every
+	// bound thinking block stripped instead of letting the API drop only the stale ones.
+	it("sends Mythos 5.1+ binding controls first-party but keeps them off Vertex and Mythos 5", () => {
+		for (const id of ["claude-mythos-5-1", "claude-mythos-5-2"]) {
+			const direct = createModel({ id, api: "anthropic-messages", provider: "anthropic" });
+			const vertex = createModel({ id, api: "anthropic-messages", provider: "google-vertex" });
+			expect(direct.thinking?.prefixBinding).toBe(true);
+			expect(direct.compat.supportsThinkingBindingControls).toBe(true);
+			expect(vertex.compat.supportsThinkingBindingControls).toBe(false);
+		}
+		const mythos5 = createModel({ id: "claude-mythos-5", api: "anthropic-messages", provider: "anthropic" });
+		expect(mythos5.compat.supportsThinkingBindingControls).toBe(false);
+	});
+
 	it("keeps Sonnet 5.5 binding controls and per-message effort off Vertex, which rejects both", () => {
 		const direct = createModel({ id: "claude-sonnet-5-5", api: "anthropic-messages", provider: "anthropic" });
 		const vertex = createModel({

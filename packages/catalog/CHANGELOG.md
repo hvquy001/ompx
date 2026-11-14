@@ -10,6 +10,7 @@
 
 - Fixed newly discovered Anthropic Fable/Mythos models showing as text-only, non-reasoning, and mispriced before models.dev catalogs them
 - Fixed Claude Mythos 5.1 not using thinking prefix-binding controls, which it needs on every account
+- Fixed Claude Mythos 5.1 and 5.2 hitting a 400 and losing all earlier thinking after a conversation edit; they now ask the API to drop only the stale thinking blocks, like Fable
 
 ## [18.18.4] - 2026-11-09
 

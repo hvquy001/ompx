@@ -146,14 +146,17 @@ function answered(text: string, turn: CapturedTurn): AssistantMessage {
 const READ_TOOL = { name: "read", description: "Read a file.", parameters: { type: "object", properties: {} } };
 
 describe("Anthropic preserved-thinking request shaping", () => {
-	it.each(["claude-fable-5-1", "claude-opus-5-5"])("opts %s into dropping prefix-mismatched thinking", async id => {
-		const payload = await capturePayload(makeAnthropicModel(id), {
-			thinkingEnabled: true,
-			reasoning: Effort.High,
-		});
+	it.each(["claude-fable-5-1", "claude-opus-5-5", "claude-mythos-5-1", "claude-mythos-5-2"])(
+		"opts %s into dropping prefix-mismatched thinking",
+		async id => {
+			const payload = await capturePayload(makeAnthropicModel(id), {
+				thinkingEnabled: true,
+				reasoning: Effort.High,
+			});
 
-		expect(payload.thinking?.block_binding).toEqual({ prefix_mismatch_behavior: "drop_block" });
-	});
+			expect(payload.thinking?.block_binding).toEqual({ prefix_mismatch_behavior: "drop_block" });
+		},
+	);
 
 	it("allows callers to make prefix mismatches fail loudly", async () => {
 		const payload = await capturePayload(makeAnthropicModel("claude-fable-5-1"), {
