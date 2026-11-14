@@ -1,12 +1,12 @@
 # OMPx Coding Agent Installer for Windows
-# Usage: irm https://raw.githubusercontent.com/qtnx/omppp/main/scripts/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1 | iex
 #
 # Or with options:
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/qtnx/omppp/main/scripts/install.ps1))) -Source
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/qtnx/omppp/main/scripts/install.ps1))) -Binary
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/qtnx/omppp/main/scripts/install.ps1))) -Source -Ref v3.20.1
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/qtnx/omppp/main/scripts/install.ps1))) -Source -Ref main
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/qtnx/omppp/main/scripts/install.ps1))) -Binary -Ref v3.20.1
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1))) -Source
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1))) -Binary
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1))) -Source -Ref v3.20.1
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1))) -Source -Ref main
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1))) -Binary -Ref v3.20.1
 
 param(
     [switch]$Source,
@@ -24,7 +24,7 @@ if ($PSVersionTable.PSVersion -lt [version]"5.1") {
     throw "Windows PowerShell 5.1 or newer is required (found $($PSVersionTable.PSVersion)). Install PowerShell 7 from https://aka.ms/powershell and re-run the installer."
 }
 
-$Repo = "qtnx/omppp"
+$Repo = "hvquy001/ompx"
 $Package = "@oh-my-pi/pi-coding-agent"
 $InstallDir = if ($env:PI_INSTALL_DIR) { $env:PI_INSTALL_DIR } else { "$env:LOCALAPPDATA\ompx" }
 # Windows PowerShell 5.1 (.NET Framework) does not reliably resolve

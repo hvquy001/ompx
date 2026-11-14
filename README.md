@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="https://github.com/qtnx/omppp/blob/main/assets/hero.png?raw=true" alt="OMPx">
+  <img src="https://github.com/hvquy001/ompx/blob/main/assets/hero.png?raw=true" alt="OMPx">
 </p>
 
 <h1 align="center">OMPx</h1>
 
 <p align="center">
   <strong>an upgrade for OMP</strong>
-  <strong><a href="https://github.com/qtnx/omppp">github.com/qtnx/omppp</a></strong>
+  <strong><a href="https://github.com/hvquy001/ompx">github.com/hvquy001/ompx</a></strong>
 </p>
 
 <p align="center">
@@ -15,9 +15,9 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent"><img src="https://img.shields.io/npm/v/@oh-my-pi/pi-coding-agent?style=flat&colorA=222222&colorB=CB3837" alt="npm version"></a>
-  <a href="https://github.com/qtnx/omppp/blob/main/packages/coding-agent/CHANGELOG.md"><img src="https://img.shields.io/badge/changelog-keep-E05735?style=flat&colorA=222222" alt="Changelog"></a>
-  <a href="https://github.com/qtnx/omppp/actions"><img src="https://img.shields.io/github/actions/workflow/status/qtnx/omppp/ci.yml?style=flat&colorA=222222&colorB=3FB950" alt="CI"></a>
-  <a href="https://github.com/qtnx/omppp/blob/main/LICENSE"><img src="https://img.shields.io/github/license/qtnx/omppp?style=flat&colorA=222222&colorB=58A6FF" alt="License"></a>
+  <a href="https://github.com/hvquy001/ompx/blob/main/packages/coding-agent/CHANGELOG.md"><img src="https://img.shields.io/badge/changelog-keep-E05735?style=flat&colorA=222222" alt="Changelog"></a>
+  <a href="https://github.com/hvquy001/ompx/actions"><img src="https://img.shields.io/github/actions/workflow/status/hvquy001/ompx/ci.yml?style=flat&colorA=222222&colorB=3FB950" alt="CI"></a>
+  <a href="https://github.com/hvquy001/ompx/blob/main/LICENSE"><img src="https://img.shields.io/github/license/hvquy001/ompx?style=flat&colorA=222222&colorB=58A6FF" alt="License"></a>
   <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&colorA=222222&logo=typescript&logoColor=white" alt="TypeScript"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-DEA584?style=flat&colorA=222222&logo=rust&logoColor=white" alt="Rust"></a>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f472b6?style=flat&colorA=222222" alt="Bun"></a>
@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  OMPx is a qtnx-maintained upgrade of <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>, which descends from <a href="https://github.com/badlogic/pi-mono">Pi</a> by <a href="https://github.com/mariozechner">@mariozechner</a>.
+  OMPx is a hvquy001-maintained upgrade of <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>, which descends from <a href="https://github.com/badlogic/pi-mono">Pi</a> by <a href="https://github.com/mariozechner">@mariozechner</a>.
 </p>
 
 The most capable agent surface that ships. Continuously tuned by real-world use — complete out of the box, open all the way down.
@@ -43,7 +43,7 @@ The most capable agent surface that ships. Continuously tuned by real-world use 
 **macOS · Linux**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/qtnx/omppp/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.sh | sh
 ```
 
 Without a usable bun (or with `--binary`), the install scripts fetch the prebuilt binary from `build.stencil.so` and check its SHA-256 before installing it. Pin a release with `curl -fsSL https://omp.sh/install | sh -s -- --binary --ref v<version>` (PowerShell: `-Binary -Ref v<version>`).
@@ -90,13 +90,13 @@ Flake consumers can use `packages.<system>.omp`, `overlays.default`, `nixosModul
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/qtnx/omppp/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1 | iex
 ```
 
 **Pinned versions (mise)**
 
 ```sh
-mise use -g github:qtnx/omppp
+mise use -g github:hvquy001/ompx
 ```
 
 macOS · Linux · Windows · bun ≥ 1.4.4
@@ -571,7 +571,7 @@ Full reference: [omp.sh/docs/sdk](https://omp.sh/docs/sdk).
 
 Pick it up at **[omp.sh](https://omp.sh)**.
 
-OMPx is an upgrade for OMP, a fork of [Pi](https://github.com/badlogic/pi-mono) by [Mario Zechner](https://github.com/mariozechner), rewritten as a coding-first surface: sessions, subagents, slash commands, extensions — all TypeScript, all MIT, all on [GitHub](https://github.com/qtnx/omppp). Shape it from config, hook it from outside, or read the source when you need to.
+OMPx is an upgrade for OMP, a fork of [Pi](https://github.com/badlogic/pi-mono) by [Mario Zechner](https://github.com/mariozechner), rewritten as a coding-first surface: sessions, subagents, slash commands, extensions — all TypeScript, all MIT, all on [GitHub](https://github.com/hvquy001/ompx). Shape it from config, hook it from outside, or read the source when you need to.
 
 ### Primitives
 

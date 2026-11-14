@@ -1,7 +1,7 @@
 {
 	"name": "omp-monorepo",
 	"private": true,
-	"homepage": "https://github.com/qtnx/omppp",
+	"homepage": "https://github.com/hvquy001/ompx",
 	"license": "MIT",
 	"author": "Stencil Labs, Inc.",
 	"workspaces": {

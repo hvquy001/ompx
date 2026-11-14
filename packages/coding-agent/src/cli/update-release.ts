@@ -3,7 +3,7 @@ import { pipeline } from "node:stream/promises";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { withTimeoutSignal } from "../utils/fetch-timeout";
 
-const REPO = "qtnx/omppp";
+const REPO = "hvquy001/ompx";
 const GITHUB_API = `https://api.github.com/repos/${REPO}`;
 const GITHUB_RELEASE_DOWNLOAD = `https://github.com/${REPO}/releases/download`;
 const STABLE_VERSION_TAG = /^v(\d+\.\d+\.\d+)$/;

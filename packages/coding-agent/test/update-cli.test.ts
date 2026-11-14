@@ -74,7 +74,7 @@ const npmSupportsReleaseAge = (() => {
  * release-age window must exclude it, so a mise that honors
  * `minimum_release_age` never resolves it.
  */
-const MISE_FIXTURE_RECENT = "github:qtnx/omppp@2.0.0";
+const MISE_FIXTURE_RECENT = "github:hvquy001/ompx@2.0.0";
 const MISE_FIXTURE_RELEASES = [
 	{ tag_name: "v2.0.0", draft: false, prerelease: false, created_at: "2026-09-09T00:00:00Z", assets: [] },
 	{ tag_name: "v1.0.0", draft: false, prerelease: false, created_at: "2020-01-01T00:00:00Z", assets: [] },
@@ -97,7 +97,7 @@ function serveMiseFixture(): { url: string; stop: () => void } {
 /** A tool entry whose own release-age window excludes the fixture's recent release. */
 function miseFixtureConfig(apiUrl: string): string {
 	return `[tools]
-"github:qtnx/omppp" = { version = "1", minimum_release_age = "999y", api_url = "${apiUrl}" }
+"github:hvquy001/ompx" = { version = "1", minimum_release_age = "999y", api_url = "${apiUrl}" }
 `;
 }
 
@@ -147,7 +147,7 @@ async function miseHonorsReleaseAge(binary: string): Promise<boolean> {
 	};
 	try {
 		await Bun.write(path.join(root, "mise.toml"), miseFixtureConfig(fixture.url));
-		const blocked = await run(["upgrade", "github:qtnx/omppp", "--bump", "--dry-run"]);
+		const blocked = await run(["upgrade", "github:hvquy001/ompx", "--bump", "--dry-run"]);
 		if (blocked.includes(MISE_FIXTURE_RECENT)) return false;
 		const allowed = await run([...buildMiseUpgradeArgs(), "--dry-run"]);
 		return allowed.includes(MISE_FIXTURE_RECENT);
@@ -639,10 +639,10 @@ describe("update-cli install target detection", () => {
 
 	it("uses mise update when prioritized ompx is in an active mise bin path", () => {
 		const method = resolveUpdateMethodForTest(
-			"/Users/test/.local/share/mise/installs/github-qtnx-omppp/latest/bin/ompx",
+			"/Users/test/.local/share/mise/installs/github-hvquy001-ompx/latest/bin/ompx",
 			undefined,
 			{
-				miseBinDirs: ["/Users/test/.local/share/mise/installs/github-qtnx-omppp/latest/bin"],
+				miseBinDirs: ["/Users/test/.local/share/mise/installs/github-hvquy001-ompx/latest/bin"],
 			},
 		);
 
@@ -667,15 +667,15 @@ describe("update-cli bun install command", () => {
 	});
 
 	it("keeps OMPx Homebrew and mise update targets", () => {
-		expect(buildHomebrewUpdateArgs(false)).toEqual(["upgrade", "qtnx/omppp/ompx"]);
-		expect(buildHomebrewUpdateArgs(true)).toEqual(["reinstall", "qtnx/omppp/ompx"]);
-		expect(buildMiseUpgradeArgs()).toEqual(["upgrade", "github:qtnx/omppp", "--bump", "--before", "0s"]);
-		expect(buildMiseUpgradeArgs(false)).toEqual(["upgrade", "github:qtnx/omppp", "--bump"]);
+		expect(buildHomebrewUpdateArgs(false)).toEqual(["upgrade", "hvquy001/ompx/ompx"]);
+		expect(buildHomebrewUpdateArgs(true)).toEqual(["reinstall", "hvquy001/ompx/ompx"]);
+		expect(buildMiseUpgradeArgs()).toEqual(["upgrade", "github:hvquy001/ompx", "--bump", "--before", "0s"]);
+		expect(buildMiseUpgradeArgs(false)).toEqual(["upgrade", "github:hvquy001/ompx", "--bump"]);
 		expect(buildMiseUpdateEnv({ PATH: "/bin", MISE_MINIMUM_RELEASE_AGE: "24h" })).toEqual({
 			PATH: "/bin",
 			MISE_MINIMUM_RELEASE_AGE: "0s",
 		});
-		expect(buildMiseForceInstallArgs("1.7.1")).toEqual(["install", "--force", "github:qtnx/omppp@1.7.1"]);
+		expect(buildMiseForceInstallArgs("1.7.1")).toEqual(["install", "--force", "github:hvquy001/ompx@1.7.1"]);
 	});
 
 	it.skipIf(!miseSupportsReleaseAge)(
@@ -703,7 +703,7 @@ describe("update-cli bun install command", () => {
 					return stdout + stderr;
 				};
 
-				const blocked = await run(["upgrade", "github:qtnx/omppp", "--bump", "--dry-run"]);
+				const blocked = await run(["upgrade", "github:hvquy001/ompx", "--bump", "--dry-run"]);
 				expect(blocked).not.toContain(`Would install ${MISE_FIXTURE_RECENT}`);
 
 				const allowed = await run([...buildMiseUpgradeArgs(), "--dry-run"]);
@@ -1163,8 +1163,8 @@ describe("update-cli bun cache pruning", () => {
 describe("update-cli release binary integrity", () => {
 	const tag = "v17.1.2";
 	const binaryName = "ompx-linux-x64";
-	// OMPx self-updates from the fork's releases; keep the fixture URL on `qtnx/omppp`.
-	const url = `https://github.com/qtnx/omppp/releases/download/${tag}/${binaryName}`;
+	// OMPx self-updates from the fork's releases; keep the fixture URL on `hvquy001/ompx`.
+	const url = `https://github.com/hvquy001/ompx/releases/download/${tag}/${binaryName}`;
 	const content = "verified binary";
 	const digest = `sha256:${Bun.SHA256.hash(content, "hex")}`;
 
@@ -1495,7 +1495,7 @@ describe("update-cli binary replacement", () => {
 
 describe("update-cli install script path", () => {
 	it("pins the install script URL to the release tag on the fork repo", () => {
-		expect(installScriptUrl("v1.2.0")).toBe("https://raw.githubusercontent.com/qtnx/omppp/v1.2.0/scripts/install.sh");
+		expect(installScriptUrl("v1.2.0")).toBe("https://raw.githubusercontent.com/hvquy001/ompx/v1.2.0/scripts/install.sh");
 	});
 
 	it("passes the install dir and pinned ref to the script, then keeps the verified result", async () => {
@@ -1769,7 +1769,7 @@ describe("update-cli binary-only release gating", () => {
 describe("update-cli script-shim takeover", () => {
 	const version = "1.7.0";
 	const binaryName = "ompx-windows-x64.exe";
-	const url = `https://github.com/qtnx/omppp/releases/download/v${version}/${binaryName}`;
+	const url = `https://github.com/hvquy001/ompx/releases/download/v${version}/${binaryName}`;
 
 	function makeFetch(content: string, prerelease = false): (input: string | URL | Request) => Promise<Response> {
 		const digest = `sha256:${Bun.SHA256.hash(content, "hex")}`;
@@ -1984,7 +1984,7 @@ describe("update-cli script-shim takeover", () => {
 describe("update-cli concurrent binary updates", () => {
 	const version = "999.0.0";
 	const binaryName = "ompx-linux-x64";
-	const url = `https://github.com/qtnx/omppp/releases/download/v${version}/${binaryName}`;
+	const url = `https://github.com/hvquy001/ompx/releases/download/v${version}/${binaryName}`;
 	const payload = Buffer.alloc(2048, 0x41);
 	const digest = `sha256:${Bun.SHA256.hash(payload, "hex")}`;
 

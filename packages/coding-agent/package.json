@@ -10,9 +10,9 @@
 		"llm",
 		"tui"
 	],
-	"homepage": "https://github.com/qtnx/omppp",
+	"homepage": "https://github.com/hvquy001/ompx",
 	"bugs": {
-		"url": "https://github.com/qtnx/omppp/issues"
+		"url": "https://github.com/hvquy001/ompx/issues"
 	},
 	"license": "MIT",
 	"author": "Can Boluk",
@@ -21,7 +21,7 @@
 	],
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/qtnx/omppp.git",
+		"url": "git+https://github.com/hvquy001/ompx.git",
 		"directory": "packages/coding-agent"
 	},
 	"bin": {

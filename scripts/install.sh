@@ -2,10 +2,10 @@
 set -e
 
 # OMPx Coding Agent Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/qtnx/omppp/main/scripts/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.sh | sh
 #
 # By default this downloads the prebuilt binary from the GitHub releases of
-# qtnx/omppp. The npm registry is never used unless you opt in with --source.
+# hvquy001/ompx. The npm registry is never used unless you opt in with --source.
 #
 # Options:
 #   --source       Install via bun from source (requires bun to already be installed)
@@ -14,7 +14,7 @@ set -e
 #   -r <ref>       Shorthand for --ref
 #   --linear       Add the official Linear MCP server after installing (default: skip)
 
-REPO="qtnx/omppp"
+REPO="hvquy001/ompx"
 PACKAGE="@oh-my-pi/pi-coding-agent"
 INSTALL_DIR="${PI_INSTALL_DIR:-$HOME/.local/bin}"
 MIN_BUN_VERSION="1.4.4"

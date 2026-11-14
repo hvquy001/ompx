@@ -69,7 +69,7 @@ describe("release update metadata", () => {
 
 		expect(release).toEqual({ tag: "v15.10.1", version: "15.10.1" });
 		expect(calls).toHaveLength(2);
-		expect(calls[0]?.url).toBe("https://api.github.com/repos/qtnx/omppp/releases?per_page=100");
+		expect(calls[0]?.url).toBe("https://api.github.com/repos/hvquy001/ompx/releases?per_page=100");
 		const headers = new Headers(calls[0]?.init?.headers);
 		expect(headers.get("Accept")).toBe("application/vnd.github+json");
 		expect(headers.get("User-Agent")).toBe("ompx-update");
@@ -83,7 +83,7 @@ describe("release update metadata", () => {
 describe("release update assets", () => {
 	it("builds release asset URLs from the exact GitHub tag", () => {
 		expect(releaseAssetUrl("v15.10.1", "ompx-linux-x64")).toBe(
-			"https://github.com/qtnx/omppp/releases/download/v15.10.1/ompx-linux-x64",
+			"https://github.com/hvquy001/ompx/releases/download/v15.10.1/ompx-linux-x64",
 		);
 	});
 
@@ -133,8 +133,8 @@ describe("release update assets", () => {
 
 		expect(await Bun.file(tempPath).text()).toBe("binary payload");
 		expect(urls).toEqual([
-			"https://github.com/qtnx/omppp/releases/download/v15.10.1/SHA256SUMS",
-			"https://github.com/qtnx/omppp/releases/download/v15.10.1/ompx-linux-x64",
+			"https://github.com/hvquy001/ompx/releases/download/v15.10.1/SHA256SUMS",
+			"https://github.com/hvquy001/ompx/releases/download/v15.10.1/ompx-linux-x64",
 		]);
 	});
 

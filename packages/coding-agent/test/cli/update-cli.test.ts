@@ -27,7 +27,7 @@ describe("runUpdateCommand fetch cancellation", () => {
 		vi.spyOn(globalThis, "fetch").mockImplementation(fetchStub);
 
 		await runUpdateCommand({ force: false, check: true });
-		expect(requestUrl).toBe("https://api.github.com/repos/qtnx/omppp/releases?per_page=100");
+		expect(requestUrl).toBe("https://api.github.com/repos/hvquy001/ompx/releases?per_page=100");
 
 		expect(requestSignal).toBeInstanceOf(AbortSignal);
 	});

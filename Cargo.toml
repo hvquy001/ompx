@@ -29,8 +29,8 @@ edition = "2024"
 rust-version = "1.101"
 license = "MIT"
 authors = ["Can Boluk"]
-homepage = "https://github.com/qtnx/omppp"
-repository = "https://github.com/qtnx/omppp"
+homepage = "https://github.com/hvquy001/ompx"
+repository = "https://github.com/hvquy001/ompx"
 
 [patch.crates-io]
 # portable-pty 0.9.0 pins nix 0.28, whose cfg_aliases 0.1.1 expansion emits

@@ -8,7 +8,7 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 
 ### Repository Remotes
 
-This working copy is the **OMPx** fork. Keep `origin` pointed at `git@github.com:qtnx/omppp.git` for qtnx-owned pushes, and keep `upstream` pointed at `git@github.com:can1357/oh-my-pi.git` for pulling the original project's changes. Fetch or rebase from `upstream/main`; push local fork work to `origin/main`.
+This working copy is the **OMPx** fork. Keep `origin` pointed at `git@github.com:hvquy001/ompx.git` for hvquy001-owned pushes, and keep `upstream` pointed at `git@github.com:can1357/oh-my-pi.git` for pulling the original project's changes. Fetch or rebase from `upstream/main`; push local fork work to `origin/main`.
 
 ### Package Structure
 
@@ -33,7 +33,7 @@ This is the **OMPx fork** of `can1357/oh-my-pi`. The decisions below intentional
 
 - **Implementer/subagent tiers are exactly `quick_task` / `task`.** `heavy_task` was removed (subagent speed tuning: every slice is sized to 10 min; load-bearing work is a `task`; the main agent reviews returned results, there is no subagent self-review). Upstream renamed `quick_task` → `sonic` (`6c1152647`) and replaced the `oracle` subagent with `tester` (`720fb3f12`). On sync, KEEP the fork tier names and do NOT reintroduce `heavy_task` — the delegation-reminder plugin, duo/advisor runtime, and orchestrator prompts depend on them. Adopt upstream `tester` only **additively**; never rename `quick_task` to `sonic`.
 - **Versioning stays on the fork 1.x line.** Keep the OMPx version in `package.json` and every package manifest; do NOT adopt upstream's 16.x version.
-- **Branding/self-update stays OMPx.** Keep the `ompx` CLI rebrand and self-update from `qtnx/omppp`; do NOT revert to upstream `omp` branding or update source.
+- **Branding/self-update stays OMPx.** Keep the `ompx` CLI rebrand and self-update from `hvquy001/ompx`; do NOT revert to upstream `omp` branding or update source.
 - **Fork-only packages & features must survive merges:** `context-gc-plugin`, `delegation-reminder-plugin`, `system-context-reminder-plugin`, safe orchestrator mode, duo/advisor runtime, the `workflow` tool, Herdr agent-state, the macOS sandbox suite, the browser annotate suite, and the agent `compact` tool.
 - **CI structure stays fork-shaped:** GitHub-hosted runners, the release security gate, and the OSV scanner. Port upstream's new/renamed test paths without discarding these.
 - **Anthropic cache policy stays fork-shaped:** Under Auto, official native Anthropic OAuth with long-cache support defaults to `1h`; API-key, custom-gateway, Foundry, and non-Anthropic routes default to `short`; preserve precedence `explicit request > PI_CACHE_RETENTION > route default`. When Anthropic caching/auth/base-URL code changes, preserve and run `packages/ai/test/anthropic-alignment.test.ts`.

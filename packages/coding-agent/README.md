@@ -5,7 +5,7 @@ Core implementation package for the `ompx` coding agent in the OMPx monorepo.
 For installation, setup, provider configuration, model roles, slash commands, and full CLI reference, see:
 
 - [Monorepo README (local)](../../README.md)
-- [Monorepo README (GitHub)](https://github.com/qtnx/omppp#readme)
+- [Monorepo README (GitHub)](https://github.com/hvquy001/ompx#readme)
 
 Package-specific references:
 

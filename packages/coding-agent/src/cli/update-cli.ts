@@ -3,7 +3,7 @@
  *
  * Handles `ompx update` to check for and install updates.
  *
- * OMPx is distributed as a GitHub release binary from `qtnx/omppp`. On POSIX
+ * OMPx is distributed as a GitHub release binary from `hvquy001/ompx`. On POSIX
  * platforms updates run the repo's `scripts/install.sh` (pinned to the release
  * tag) so the update path and the install path stay one source of truth —
  * checksum verification, standard-config seeding, and any future installer
@@ -53,10 +53,10 @@ import {
 
 import { cfgUpdateChannel } from "../modes/settings";
 
-const REPO = "qtnx/omppp";
+const REPO = "hvquy001/ompx";
 const PACKAGE = "@oh-my-pi/pi-coding-agent";
-const HOMEBREW_FORMULA = "qtnx/omppp/ompx";
-const MISE_TOOL = "github:qtnx/omppp";
+const HOMEBREW_FORMULA = "hvquy001/ompx/ompx";
+const MISE_TOOL = "github:hvquy001/ompx";
 const NIX_STORE_DIR = "/nix/store";
 const GITHUB_API = "https://api.github.com";
 const RELEASE_METADATA_TIMEOUT_MS = 30_000;
