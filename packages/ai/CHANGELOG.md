@@ -20,6 +20,9 @@
 ### Fixed
 
 - Fixed slow streaming of Gemma tool calls with large arguments.
+### Fixed
+
+- Fixed the managed Antigravity CLI download failing on slow connections and being reported as a sign-in timeout; it now aborts only after 60 seconds with no data and reports the bytes received ([#19463](https://github.com/can1357/oh-my-pi/issues/19463))
 
 ## [18.21.0] - 2026-11-16
 
