@@ -243,7 +243,7 @@ describe("AgentSession yield empty-stop suppression", () => {
 		const observerEvents: string[] = [];
 		const observerSettled = Promise.withResolvers<void>();
 		session.subscribe(event => {
-			if (event.type === "agent_end") observerEvents.push(`agent_end:${mock.calls.length}:${event.isTerminal}`);
+			if (event.type === "agent_end") observerEvents.push(`agent_end:${mock.calls.length}`);
 		});
 		session.setIrcWakeTurnObserver(() => {
 			observerEvents.push("started");
@@ -267,6 +267,6 @@ describe("AgentSession yield empty-stop suppression", () => {
 		expect(mock.calls).toHaveLength(3);
 		expect(reminderMessages(session.agent.state.messages)).toHaveLength(1);
 		expect(assistantText(session.agent.state.messages)).toContain("recovered after IRC retry");
-		expect(observerEvents).toEqual(["started", "agent_end:2:false", "agent_end:3:true", "finished:3"]);
+		expect(observerEvents).toEqual(["started", "agent_end:3", "finished:3"]);
 	});
 });

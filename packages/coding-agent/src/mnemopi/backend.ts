@@ -8,6 +8,7 @@ import type { MnemopiLlmCompleteOptions } from "@oh-my-pi/pi-mnemopi/core/runtim
 import type * as MnemopiDiagnoseNs from "@oh-my-pi/pi-mnemopi/diagnose";
 import type { DiagnosticSummary } from "@oh-my-pi/pi-mnemopi/diagnose";
 import { logger, prompt, withLoopPhase } from "@oh-my-pi/pi-utils";
+import { cfgOffline } from "../config/auxiliary-model-policy";
 import type { ModelRegistry } from "../config/model-registry";
 import { roleCandidatePool } from "../config/model-roles";
 import { resolveRoleChain } from "../config/model-resolver";
@@ -35,6 +36,7 @@ import {
 	truncateApproxTokens,
 } from "./config";
 import { mnemopiEmbedClient } from "./embed-client";
+import { embeddingFailureNotifier } from "./embedding-notice";
 import {
 	getMnemopiScopedBanks,
 	getMnemopiScopedDbPaths,
@@ -150,6 +152,7 @@ export const mnemopiBackend: MemoryBackend = {
 				modelRegistry,
 				sessionId,
 				session.sessionManager,
+				session,
 			);
 			await Promise.all([loadMnemopi(), loadMnemopiCore()]);
 			await installMnemopiState(session, config, getMnemopiSessionStateFromParent(options));
@@ -224,6 +227,7 @@ export const mnemopiBackend: MemoryBackend = {
 					session.modelRegistry,
 					session.sessionId,
 					session.sessionManager,
+					session,
 				);
 				await Promise.all([loadMnemopi(), loadMnemopiCore()]);
 				state = await installMnemopiState(session, config);
@@ -497,6 +501,7 @@ async function loadMnemopiConfigWithProviders(
 	modelRegistry: ModelRegistry,
 	sessionId: string,
 	usageLedger: Partial<JudgmentUsageLedger>,
+	session: AgentSession,
 ): Promise<MnemopiBackendConfig> {
 	const config = loadMnemopiConfig(settings, agentDir);
 	config.providerOptions = await resolveMnemopiProviderOptions(
@@ -505,6 +510,7 @@ async function loadMnemopiConfigWithProviders(
 		modelRegistry,
 		sessionId,
 		usageLedger,
+		session,
 	);
 	return config;
 }
@@ -534,9 +540,33 @@ async function resolveMnemopiProviderOptions(
 	modelRegistry: ModelRegistry,
 	sessionId: string,
 	usageLedger: Partial<JudgmentUsageLedger>,
+	session: AgentSession,
 ): Promise<MnemopiProviderOptions> {
 	const base: MnemopiProviderOptions = {
 		noEmbeddings: config.providerOptions.noEmbeddings,
+		embeddings: {
+			...(config.providerOptions.embeddings || undefined),
+			onRequestFailed: embeddingFailureNotifier(session),
+			allowLocal: () => !cfgOffline.get(settings) || session.model?.api === "local-inference",
+			// Initializing fastembed can download missing or corrupt files, even when
+			// the cache initially appears complete. Reuse only an already loaded model.
+			allowLocalLoad: () => !cfgOffline.get(settings),
+			allowRemote: baseUrl => {
+				if (!cfgOffline.get(settings)) return true;
+				const model = session.model;
+				if (!model?.provider || !model.baseUrl) return false;
+				try {
+					const endpoint = new URL(baseUrl);
+					const sessionEndpoint = new URL(model.baseUrl);
+					return (
+						(endpoint.protocol === "https:" || endpoint.protocol === "http:") &&
+						endpoint.origin === sessionEndpoint.origin
+					);
+				} catch {
+					return false;
+				}
+			},
+		},
 		embeddingModel: config.providerOptions.embeddingModel,
 		embeddingApiUrl: config.providerOptions.embeddingApiUrl,
 		embeddingApiKey:
@@ -553,6 +583,8 @@ async function resolveMnemopiProviderOptions(
 		return {
 			...base,
 			llm: {
+				// A custom endpoint has no trusted provider identity.
+				allowRemote: () => !cfgOffline.get(settings),
 				baseUrl: config.llmBaseUrl,
 				apiKey:
 					config.llmApiKey ??
@@ -565,8 +597,19 @@ async function resolveMnemopiProviderOptions(
 	}
 
 	try {
-		const candidates = resolveRoleChain("memory", settings, roleCandidatePool("memory", settings, modelRegistry));
-		const primary = candidates[0]?.model;
+		const resolveCandidates = () => {
+			const pool = roleCandidatePool("memory", settings, modelRegistry);
+			if (!cfgOffline.get(settings)) return resolveRoleChain("memory", settings, pool);
+			const provider = session.model?.provider;
+			return provider
+				? resolveRoleChain(
+						"memory",
+						settings,
+						pool.filter(model => model.provider === provider),
+					)
+				: [];
+		};
+		const primary = resolveCandidates()[0]?.model;
 		if (!primary) {
 			logger.warn("Mnemopi: llmMode=smol but no memory model resolved; continuing without LLM.");
 			return base;
@@ -585,10 +628,13 @@ async function resolveMnemopiProviderOptions(
 						: undefined,
 			};
 
-			for (const { model, thinkingLevel } of candidates) {
+			for (const { model, thinkingLevel } of resolveCandidates()) {
 				if (signal?.aborted) return null;
+				if (cfgOffline.get(settings) && session.model?.provider !== model.provider) continue;
 				try {
 					if (model.api === "local-inference") {
+						// The tiny worker may download its runtime or model on first use.
+						if (cfgOffline.get(settings)) continue;
 						const result = await tinyModelClient.complete(model.id, request.prompt, {
 							maxTokens: opts?.maxTokens,
 							systemPrompt: request.systemPrompt,
@@ -604,6 +650,7 @@ async function resolveMnemopiProviderOptions(
 					}
 
 					const hasApiKey = await modelRegistry.getApiKey(model, sessionId);
+					if (cfgOffline.get(settings) && session.model?.provider !== model.provider) continue;
 					if (!hasApiKey) {
 						logger.warn("Mnemopi: memory completion model has no current API key; trying the next fallback.", {
 							provider: model.provider,
@@ -614,8 +661,11 @@ async function resolveMnemopiProviderOptions(
 					// `auto` has no per-request classifier here, so it sends no effort, like an omitted suffix.
 					const level = concreteThinkingLevel(thinkingLevel);
 					const message = await retryTransientCompletion(
-						() =>
-							withLoopPhase("mnemopi.extract", () =>
+						() => {
+							if (cfgOffline.get(settings) && session.model?.provider !== model.provider) {
+								throw new Error("Memory model provider differs from the active session provider");
+							}
+							return withLoopPhase("mnemopi.extract", () =>
 								completeSimple(
 									model,
 									{
@@ -643,7 +693,8 @@ async function resolveMnemopiProviderOptions(
 											}),
 									},
 								),
-							),
+							);
+						},
 						{ provider: model.provider, signal },
 					);
 					if (message.stopReason === "aborted" || signal?.aborted) return null;

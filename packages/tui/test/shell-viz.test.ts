@@ -73,7 +73,7 @@ describe("native shell presentation boundary", () => {
 		expect(output).toContain("false first second");
 	});
 
-	it("renders the command instead of crashing when a persisted archive's units overrun its script", async () => {
+	it("renders without visualization instead of crashing when a persisted archive's units overrun its script", async () => {
 		const command = "echo super-secret-value-123 | wc -c";
 		const trace = new RunTrace(command);
 		const result = await new Shell().run({ command, trace });
@@ -82,8 +82,7 @@ describe("native shell presentation boundary", () => {
 		// Sessions written before the fix: redaction shortened `script`, unit byte offsets kept.
 		const corrupt = { ...stored, script: stored.script.replace("super-secret-value-123", "$$X:M$$") };
 		expect(() => new ShellVisualization(JSON.stringify(corrupt))).toThrow("trace unit lies outside script");
-		const presentation = readShellPresentation(shellVisualization(corrupt), defaultShellVizPreferences(), corrupt);
-		expect(presentation.rows.flatMap(row => row.segments.map(segment => segment.text)).join(" ")).toContain("wc");
+		expect(shellVisualization(corrupt)).toBeUndefined();
 	});
 
 	it("uses the sink only live and replays real captured output from live or stored traces", async () => {
@@ -94,13 +93,14 @@ describe("native shell presentation boundary", () => {
 		const live = snapshot(trace);
 		attachShellTrace(live, trace);
 		const preferences = defaultShellVizPreferences();
-		expect(readShellPresentation(shellVisualization(live), preferences, live, "sink notice").output).toBe(
-			"sink notice",
-		);
+		const attached = shellVisualization(live);
+		if (!attached) throw new Error("Expected the attached live trace");
+		expect(readShellPresentation(attached, preferences, live, "sink notice").output).toBe("sink notice");
 		const replay = { ...preferences, cursor: live.history?.length ?? 0 };
 		expect(readShellPresentation(trace, replay, live, "sink notice").output).toBe("native-boundary\n");
 		const stored = snapshot(trace);
 		const restored = shellVisualization(stored);
+		if (!restored) throw new Error("Expected the stored trace to restore");
 		expect(readShellPresentation(restored, replay, stored).output).toBe("native-boundary\n");
 	});
 });

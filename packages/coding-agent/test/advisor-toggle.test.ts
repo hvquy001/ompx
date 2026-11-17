@@ -87,7 +87,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager,
 			settings,
 			modelRegistry,
-			advisorTools: [],
 		});
 	});
 
@@ -292,7 +291,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager: SessionManager.create(tempDir.path(), tempDir.path()),
 			settings,
 			modelRegistry,
-			advisorTools: [],
 		});
 
 		try {
@@ -332,7 +330,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager,
 			settings: session.settings,
 			modelRegistry,
-			advisorTools: [],
 		});
 		expect(customSession.isAdvisorEnabled()).toBe(false);
 
@@ -401,7 +398,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager,
 			settings,
 			modelRegistry: registry,
-			advisorTools: [],
 		});
 		try {
 			expect(raceSession.isAdvisorEnabled()).toBe(true);
@@ -436,14 +432,12 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager,
 			settings: sharedSettings,
 			modelRegistry,
-			advisorTools: [],
 		});
 		const sessionB = new AgentSession({
 			agent: session.agent,
 			sessionManager,
 			settings: sharedSettings,
 			modelRegistry,
-			advisorTools: [],
 		});
 
 		expect(sessionA.isAdvisorEnabled()).toBe(true);
@@ -507,7 +501,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry,
-			advisorTools: [],
 		});
 
 		try {
@@ -542,7 +535,7 @@ describe("AgentSession advisor toggle", () => {
 		// #10131: with the runtime gone, isUsingSubscription() must read the
 		// attribution captured as spend accrued, not fall back to a per-render
 		// getAvailable() catalog scan (which reads credential files per provider).
-		const oauthSpy = vi.spyOn(modelRegistry, "isUsingOAuth").mockReturnValue(true);
+		const subscriptionSpy = vi.spyOn(modelRegistry, "isUsingSubscription").mockReturnValue(true);
 		try {
 			const advisor = enableAdvisor();
 			appendAdvisorCost(advisor, 0.5, 1);
@@ -555,23 +548,25 @@ describe("AgentSession advisor toggle", () => {
 			expect(scanSpy).not.toHaveBeenCalled();
 			scanSpy.mockRestore();
 		} finally {
-			oauthSpy.mockRestore();
+			subscriptionSpy.mockRestore();
 		}
 	});
-	it("does not attribute paid spend to a subscription after a zero-cost OAuth turn", () => {
-		let usingOAuth = false;
-		const oauthSpy = vi.spyOn(modelRegistry, "isUsingOAuth").mockImplementation(() => usingOAuth);
+	it("does not attribute paid spend to a subscription after a zero-cost subscription turn", () => {
+		let usingSubscription = false;
+		const subscriptionSpy = vi
+			.spyOn(modelRegistry, "isUsingSubscription")
+			.mockImplementation(() => usingSubscription);
 		try {
 			const advisor = enableAdvisor();
 			appendAdvisorCost(advisor, 0.5, 1);
-			usingOAuth = true;
+			usingSubscription = true;
 			appendAdvisorCost(advisor, 0, 2);
 			session.setAdvisorEnabled(false);
 
 			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
 			expect(session.isAdvisorUsingSubscription()).toBe(false);
 		} finally {
-			oauthSpy.mockRestore();
+			subscriptionSpy.mockRestore();
 		}
 	});
 	it("retains total advisor cost after the live roster changes", () => {
@@ -748,10 +743,10 @@ describe("AgentSession advisor toggle", () => {
 	it("attributes restored advisor spend to a subscription without a catalog scan", () => {
 		// #10131 follow-up: with no live runtime, subscription attribution comes
 		// from the providers that billed the restored spend, re-derived via the
-		// current OAuth credentials — never a per-render getAvailable() scan.
+		// current subscription credentials — never a per-render getAvailable() scan.
 		session.setAdvisorEnabled(false);
-		const oauthSpy = vi
-			.spyOn(authStorage.credentials, "hasOAuth")
+		const subscriptionSpy = vi
+			.spyOn(authStorage.credentials, "hasSubscription")
 			.mockImplementation(provider => provider === "anthropic");
 		const scanSpy = vi.spyOn(modelRegistry, "getAvailable");
 		try {
@@ -762,17 +757,17 @@ describe("AgentSession advisor toggle", () => {
 			expect(scanSpy).not.toHaveBeenCalled();
 		} finally {
 			scanSpy.mockRestore();
-			oauthSpy.mockRestore();
+			subscriptionSpy.mockRestore();
 		}
 	});
-	it("does not attribute restored advisor spend to a subscription without OAuth on its provider", () => {
-		const oauthSpy = vi.spyOn(authStorage.credentials, "hasOAuth").mockReturnValue(false);
+	it("does not attribute restored advisor spend to a subscription without subscription credentials", () => {
+		const subscriptionSpy = vi.spyOn(authStorage.credentials, "hasSubscription").mockReturnValue(false);
 		try {
 			session.restoreInitialAdvisorCosts(new Map([["", 0.5]]), new Map(), new Map([["", new Set(["anthropic"])]]));
 			expect(session.getAdvisorCost()).toBeCloseTo(0.5, 8);
 			expect(session.isAdvisorUsingSubscription()).toBe(false);
 		} finally {
-			oauthSpy.mockRestore();
+			subscriptionSpy.mockRestore();
 		}
 	});
 	it("adds a turn billed while the resume scan is running to persisted spend", async () => {
@@ -991,7 +986,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager: branchManager,
 			settings: Settings.isolated({ "compaction.enabled": false, "signals.enabled": false }),
 			modelRegistry,
-			advisorTools: [],
 			extensionRunner,
 		});
 		try {
@@ -1034,7 +1028,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager: branchManager,
 			settings: Settings.isolated({ "compaction.enabled": false, "signals.enabled": false }),
 			modelRegistry,
-			advisorTools: [],
 			extensionRunner,
 		});
 		try {
@@ -1085,7 +1078,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry,
-			advisorTools: [],
 		});
 
 		try {
@@ -1157,7 +1149,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry,
-			advisorTools: [],
 		});
 
 		try {
@@ -1322,7 +1313,6 @@ describe("AgentSession advisor toggle", () => {
 			sessionManager: SessionManager.create(tempDir.path(), tempDir.path()),
 			settings: subSettings,
 			modelRegistry,
-			advisorTools: [],
 			agentKind: "sub",
 			advisorConfigs: roster,
 		});

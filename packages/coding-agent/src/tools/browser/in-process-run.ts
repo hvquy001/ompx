@@ -38,6 +38,8 @@ export interface InProcessRunContext {
 	signal: AbortSignal;
 	/** The run's budget. */
 	timeoutMs: number;
+	/** The run's absolute deadline in milliseconds since the epoch. */
+	deadline: number;
 }
 
 /** A backend tab whose `run` code executes in this process. */
@@ -132,6 +134,7 @@ postmortem.interceptUnhandledRejections(consumeRunRejection);
 
 /** Run `opts.code` against `tab`'s facades in this process. */
 export async function runInProcessTab(tab: InProcessRunTab, opts: RunInProcessOptions): Promise<RunResultOk> {
+	const deadline = Date.now() + opts.timeoutMs;
 	const runAc = new AbortController();
 	const timeoutSignal = AbortSignal.timeout(opts.timeoutMs);
 	const signal = AbortSignal.any(
@@ -151,6 +154,7 @@ export async function runInProcessTab(tab: InProcessRunTab, opts: RunInProcessOp
 		screenshots,
 		signal,
 		timeoutMs: opts.timeoutMs,
+		deadline,
 	});
 
 	const { promise: cancelRejection, reject } = Promise.withResolvers<never>();

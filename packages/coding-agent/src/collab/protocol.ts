@@ -108,7 +108,8 @@ export type CollabFrame =
 	/** Host signals the live call ended; `reason` is a human-readable cause when abnormal. */
 	| { t: "live-ended"; reason?: string }
 	| { t: "bye"; reason: string }
-	| { t: "error"; message: string };
+	/** `resync`: the host no longer counts this guest as joined; the guest should send `hello` again. */
+	| { t: "error"; message: string; resync?: true };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Pre-serialized frames: the host bounds replicated payloads by serializing
@@ -146,6 +147,10 @@ const SNAPSHOT_CHUNK_FINAL = `],"${SNAPSHOT_CHUNK_FIELDS.final}":`;
 /** The single construction point of {@link EncodedFrame}. */
 function encodedFrame(json: string): EncodedFrame {
 	return json as EncodedFrame;
+}
+
+export function encodeFrame(frame: CollabFrame): EncodedFrame {
+	return encodedFrame(JSON.stringify(frame));
 }
 
 /** `{ t: "entry", entry }` from the entry's JSON. */

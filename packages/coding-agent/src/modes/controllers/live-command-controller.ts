@@ -3,7 +3,12 @@ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { withOAuthAccess } from "@oh-my-pi/pi-ai";
 import { logger, toError } from "@oh-my-pi/pi-utils";
 import { LiveBridgeServer } from "../../live/bridge-server";
-import { LiveSessionController, type LiveSessionControllerOptions, type LiveTranscript } from "../../live/controller";
+import {
+	assertLiveProviderAllowed,
+	LiveSessionController,
+	type LiveSessionControllerOptions,
+	type LiveTranscript,
+} from "../../live/controller";
 import { LocalAgentEndpoint, LocalMediaEndpoint, localAgentIdentity } from "../../live/local-endpoints";
 import { LIVE_MODEL } from "../../live/protocol";
 import { LiveVisualizer } from "@oh-my-pi/pi-tui/apps/live-visualizer";
@@ -190,6 +195,7 @@ export class LiveCommandController {
 			agent: new LocalAgentEndpoint(this.#ctx.session, message => this.#ctx.extractAssistantText(message)),
 			identity: localAgentIdentity(this.#ctx.session),
 			authStorage: this.#ctx.session.modelRegistry.authStorage,
+			assertProviderAllowed: () => assertLiveProviderAllowed(this.#ctx.session),
 			voice,
 			instructions: remote?.instructions,
 			sdpOffer: remote?.sdpOffer,

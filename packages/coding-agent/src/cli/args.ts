@@ -84,6 +84,9 @@ export interface Args {
 	tools?: string[];
 	noLsp?: boolean;
 	noPty?: boolean;
+	noJudge?: boolean;
+	noSpotlight?: boolean;
+	offline?: boolean;
 	hooks?: string[];
 	noSandbox?: boolean;
 	extensions?: string[];
@@ -382,6 +385,12 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.noPty = true;
 		} else if (arg === "--no-sandbox") {
 			result.noSandbox = true;
+		} else if (arg === "--no-judge") {
+			result.noJudge = true;
+		} else if (arg === "--no-spotlight") {
+			result.noSpotlight = true;
+		} else if (arg === "--offline") {
+			result.offline = true;
 		} else if (arg === "--hide-thinking") {
 			result.hideThinking = true;
 		} else if (arg === "--advisor") {

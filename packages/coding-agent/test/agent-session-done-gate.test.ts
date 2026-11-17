@@ -13,6 +13,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { cfgAdvisorDoneGate } from "../src/advisor/settings";
+import { fixedAdvisorTools } from "./helpers/agent-session-setup";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure helpers
@@ -246,7 +247,7 @@ describe("AgentSession advisor done-review gate", () => {
 				"todo.reminders": false,
 			}),
 			modelRegistry,
-			advisorTools: [],
+			advisorTools: fixedAdvisorTools(),
 			advisorStreamFn: () => {
 				throw new Error("advisor stream should not run in these tests");
 			},

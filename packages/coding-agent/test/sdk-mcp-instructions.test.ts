@@ -378,14 +378,17 @@ describe("createAgentSession MCP server instructions (deferred UI)", () => {
 			expect(prompt).toContain("omitted");
 			// Every mounted MCP tool is listed exactly once: routed tools on their
 			// route line with the catalog summary, and the tool the bound omits on
-			// its xd:// catalog line.
-			expect(prompt).toContain("- xd://mcp__instr_row_cm — Bounded guidance fixture tool cm.");
+			// its catalog line.
+			expect(prompt).toContain("- mcp__instr_row_cm — Bounded guidance fixture tool cm.");
 			const mountedRows = session
 				.getXdevToolEntries()
 				.map(entry => entry.name)
 				.filter(name => name.startsWith("mcp__instr_row_"));
 			expect(mountedRows).toHaveLength(BOUNDED_GUIDANCE_TOOL_COUNT);
-			expect(mountedRows.filter(name => prompt.split(`xd://${name}`).length !== 2)).toEqual([]);
+			const listings = (name: string) =>
+				prompt.split("\n").filter(line => line.includes(`\`xd://${name}\``) || line.startsWith(`- ${name} — `))
+					.length;
+			expect(mountedRows.filter(name => listings(name) !== 1)).toEqual([]);
 		} finally {
 			await session.dispose();
 		}
@@ -607,11 +610,11 @@ describe("createAgentSession MCP server instructions (deferred UI)", () => {
 			toolNames: ["bash", "grep"],
 		});
 		try {
-			expect(session.systemPrompt.join("\n")).toContain("- Regex search/");
+			expect(session.systemPrompt.join("\n")).toContain("- Regex search → ");
 
 			await session.setActiveToolsByName(["bash"]);
 
-			expect(session.systemPrompt.join("\n")).not.toContain("- Regex search/");
+			expect(session.systemPrompt.join("\n")).not.toContain("- Regex search → ");
 		} finally {
 			await session.dispose();
 		}

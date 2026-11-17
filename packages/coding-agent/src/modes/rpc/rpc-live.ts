@@ -5,7 +5,11 @@
  */
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { toError } from "@oh-my-pi/pi-utils";
-import { LiveSessionController, type LiveSessionControllerOptions } from "../../live/controller";
+import {
+	assertLiveProviderAllowed,
+	LiveSessionController,
+	type LiveSessionControllerOptions,
+} from "../../live/controller";
 import type { LiveAgentEndpoint, LiveAgentIdentity, LiveMediaEndpoint } from "../../live/endpoints";
 import { LocalAgentEndpoint, LocalMediaEndpoint, localAgentIdentity } from "../../live/local-endpoints";
 import { resolveLiveVoice } from "../../live/settings";
@@ -134,6 +138,7 @@ export class RpcLiveBridge {
 			agent,
 			identity,
 			authStorage: this.#session.modelRegistry.authStorage,
+			assertProviderAllowed: () => assertLiveProviderAllowed(this.#session),
 			voice,
 			instructions: options.instructions,
 			sdpOffer: options.sdpOffer,

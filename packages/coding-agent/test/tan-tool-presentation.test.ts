@@ -79,7 +79,7 @@ describe("/tan prompt-cache tool presentation", () => {
 							.map(tool => ({
 								name: tool.name,
 								// The eval tool lists the session's tool names; the clone does not host the fork-only ones.
-								description: tool.description.replace(/`(?:loop|consult)`, /g, ""),
+								description: tool.description.replace(/\b(?:loop|consult), /g, ""),
 								parameters: tool.parameters,
 							}));
 					if (xdev) expect(parent.getMountedXdevToolNames()).toContain(mcpTool.name);
@@ -101,13 +101,7 @@ describe("/tan prompt-cache tool presentation", () => {
 										id: "ask-fixture",
 										name: "ask",
 										arguments: {
-											questions: [
-												{
-													id: "scope",
-													question: "Which scope?",
-													options: [{ label: "Narrow" }, { label: "Wide" }],
-												},
-											],
+											html: '<form><p>Which scope?</p><label><input type="radio" name="scope" value="narrow" checked> Narrow</label><label><input type="radio" name="scope" value="wide"> Wide</label></form>',
 										},
 									},
 								],

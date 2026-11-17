@@ -161,6 +161,8 @@ export type AsyncJobManagerProtocol = {
 	nextPollWaitMs: RpcMethod<[ownerId: string | undefined, now: number | undefined], number>;
 	peekNextPollWaitMs: RpcMethod<[ownerId: string | undefined, now: number | undefined], number>;
 	recordPollWaitEnd: RpcMethod<[ownerId: string | undefined, now: number | undefined], void>;
+	isDeliveryPending: RpcMethod<[jobId: string], boolean>;
+	isDeliverySuperseded: RpcMethod<[jobId: string], boolean>;
 	/** Resolves once the job's run promise settled (immediately for unknown ids). */
 	whenSettled: RpcMethod<[jobId: string], void>;
 	/** The job's abort signal in wire form, or undefined for unknown ids. */

@@ -119,7 +119,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			sessionManager,
 			settings: settings(),
 			modelRegistry,
-			advisorTools: [],
 			advisorStreamFn: captureStreamFn,
 			onPayload,
 			onResponse,
@@ -185,7 +184,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			// The advisor defaults on, which would build (and count) a runtime at construction.
 			settings: settings({ "advisor.enabled": false }),
 			modelRegistry,
-			advisorTools: [],
 			advisorStreamFn: () => {
 				throw new Error("capture-stop");
 			},
@@ -229,7 +227,6 @@ describe("AgentSession advisor provider-options parity", () => {
 				sessionManager,
 				settings: settings(),
 				modelRegistry,
-				advisorTools: [],
 			});
 			cfgProvidersOpenaiResponsesWebsockets.set(session.settings, true);
 			session.settings.setModelRole("advisor", `openai/${advisorModel.id}`);
@@ -267,7 +264,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			sessionManager,
 			settings: settings(),
 			modelRegistry,
-			advisorTools: [],
 			advisorStreamFn: captureStreamFn,
 		});
 		session.settings.setModelRole("advisor", "openai-codex/gpt-5.6-sol");
@@ -301,7 +297,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			sessionManager,
 			settings: settings(),
 			modelRegistry,
-			advisorTools: [],
 		});
 		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 		expect(session.setAdvisorEnabled(true)).toBe(true);
@@ -338,7 +333,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			sessionManager,
 			settings: settings(),
 			modelRegistry,
-			advisorTools: [],
 			advisorStreamFn: captureStreamFn,
 		});
 		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
@@ -377,7 +371,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			sessionManager,
 			settings: settings(),
 			modelRegistry,
-			advisorTools: [],
 			advisorStreamFn: captureStreamFn,
 		});
 		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
@@ -419,7 +412,6 @@ describe("AgentSession advisor provider-options parity", () => {
 			sessionManager,
 			settings: settings(),
 			modelRegistry,
-			advisorTools: [],
 			advisorStreamFn: captureStreamFn,
 		});
 		session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
@@ -477,7 +469,6 @@ describe("AgentSession advisor provider-options parity", () => {
 						cacheDbPath: tempDir.join("models.db"),
 					}),
 				),
-				advisorTools: [],
 				accountPoolScope,
 			});
 			session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");

@@ -261,7 +261,7 @@ export class LocalAgentEndpoint implements LiveAgentEndpoint {
 			if (event.message.stopReason === "toolUse") this.#emitProgress(event.message);
 			return;
 		}
-		if (event.type !== "agent_end" || event.isTerminal === false) return;
+		if (event.type !== "agent_end") return;
 		this.#emitFinal(event.messages);
 	}
 

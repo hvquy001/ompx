@@ -261,6 +261,8 @@ function serveManager(threadId: ThreadId): RpcServe<AsyncJobManager, AsyncJobMan
 		nextPollWaitMs: (manager, ownerId, now) => manager.nextPollWaitMs(ownerId, now),
 		peekNextPollWaitMs: (manager, ownerId, now) => manager.peekNextPollWaitMs(ownerId, now),
 		recordPollWaitEnd: (manager, ownerId, now) => manager.recordPollWaitEnd(ownerId, now),
+		isDeliveryPending: (manager, jobId) => manager.isDeliveryPending(jobId),
+		isDeliverySuperseded: (manager, jobId) => manager.isDeliverySuperseded(jobId),
 		whenSettled: async (manager, jobId) => {
 			await manager.getJob(jobId)?.promise;
 		},

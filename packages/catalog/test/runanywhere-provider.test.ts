@@ -115,7 +115,8 @@ describe("RunAnywhere provider", () => {
 		expect(models[0]).toMatchObject({
 			id: "runanywhere-only/unknown-model",
 			contextWindow: null,
-			reasoning: false,
+			// Unknown thinking capability stays undefined so the runtime probe decides.
+			reasoning: undefined,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		});
 	});

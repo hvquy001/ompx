@@ -28,7 +28,6 @@ function createRuntimeHarness(options?: { host?: string; port?: number }) {
 			editor: { setText },
 			showStatus: output,
 			refreshSlashCommandState: vi.fn(),
-			refreshPluginState: vi.fn(async () => {}),
 		} as unknown as InteractiveModeContext,
 	};
 

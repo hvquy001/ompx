@@ -1335,7 +1335,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		).toBe(true);
 	});
 
-	it("runs drained ACP async completions as owned follow-up turns despite deferred client turns", async () => {
+	it("folds drained ACP async completions into the next client prompt instead of starting an ownerless turn", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
@@ -1407,9 +1407,14 @@ describe("AgentSession concurrent prompt guard", () => {
 			await expect(drainedPromise).resolves.toBe(true);
 			await session.waitForIdle();
 
+			// No client prompt is open, so the completion must not start a turn the client never sees.
+			expect(mock.calls).toHaveLength(callsAfterFirstPrompt);
+			expect(session.isStreaming).toBe(false);
+
+			await session.prompt("Next message");
 			expect(mock.calls).toHaveLength(callsAfterFirstPrompt + 1);
 			expect(
-				mock.calls.at(-1)?.context.messages.some(message => {
+				mock.calls.at(-1)?.context.messages.filter(message => {
 					if (typeof message.content === "string") {
 						return message.content.includes("Background result");
 					}
@@ -1418,7 +1423,7 @@ describe("AgentSession concurrent prompt guard", () => {
 						content => content.type === "text" && content.text.includes("Background result"),
 					);
 				}),
-			).toBe(true);
+			).toHaveLength(1);
 		} finally {
 			deliveryGate.resolve();
 		}

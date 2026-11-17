@@ -7,6 +7,12 @@
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1))) -Source -Ref v3.20.1
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1))) -Source -Ref main
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hvquy001/ompx/main/scripts/install.ps1))) -Binary -Ref v3.20.1
+#
+# The prebuilt binary is the default. -Source installs the package via bun and is
+# implied by a bare -Ref. -Ref takes any tag/commit/branch with -Source; binary
+# installs take a release tag (v<version>). Prebuilt binaries come from the
+# GitHub releases of hvquy001/ompx and are checked against the release SHA256SUMS
+# before install.
 
 param(
     [switch]$Source,
@@ -551,6 +557,13 @@ function Install-Binary {
 
     Configure-BashShell
 
+    # An ompx earlier on PATH (a previous `bun install -g`, Scoop, ...) keeps
+    # winning over this install: $InstallDir is appended to PATH, not prepended.
+    $Active = Get-Command ompx -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($Active -and $Active.Source -ne [System.IO.Path]::GetFullPath($OutPath)) {
+        Write-Host "[WARN] 'ompx' still resolves to $($Active.Source); remove that install or move $InstallDir ahead of it on PATH." -ForegroundColor Yellow
+    }
+
     if ($needsRestart -and -not $skipPathUpdate) {
         Write-Host "Restart your terminal, then run 'ompx' to get started!"
     } elseif ($needsRestart) {
@@ -560,8 +573,9 @@ function Install-Binary {
     }
 }
 
-# Main logic
-if ($Ref -and -not $Source -and -not $Binary) {
+# Main logic. A ref can name a branch or commit, which only a source install
+# can build, so a bare -Ref selects source.
+if ($Ref -and -not $Binary) {
     $Source = $true
 }
 
@@ -571,13 +585,6 @@ if ($Source) {
     }
     Assert-BunVersion $MinimumBunVersion
     Install-ViaBun
-} elseif ($Binary) {
-    Install-Binary
 } else {
-    # Default: use bun if available and current enough, otherwise binary
-    if ((Test-BunInstalled) -and (Test-BunVersion $MinimumBunVersion)) {
-        Install-ViaBun
-    } else {
-        Install-Binary
-    }
+    Install-Binary
 }

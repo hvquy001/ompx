@@ -3,7 +3,7 @@ import type { AssistantMessage, Effort, ImageContent, Model, TextContent } from 
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { raceWithSignal } from "@oh-my-pi/pi-ai/utils/abort";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import { extractRetryHint, logger, prompt } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import consultationRequestTemplate from "../prompts/advisor/consultation-request.md" with { type: "text" };
 import consultationRequestAsyncTemplate from "../prompts/advisor/consultation-request-async.md" with { type: "text" };
@@ -25,6 +25,10 @@ import {
 import type { TurnSignals, TurnSignalService } from "../signals/index";
 import { ADVISOR_RENDER_OPTIONS, advisorToolIOTransform } from "./delta-split";
 import { fingerprintMessage } from "./message-fingerprint";
+
+/** Upper bound for one advisor retry sleep, including a provider `Retry-After` hint. */
+const ADVISOR_RETRY_MAX_DELAY_MS = 30_000;
+const ADVISOR_RETRY_JITTER_RATIO = 0.25;
 
 /**
  * Minimal slice of `Agent` the runtime drives — satisfied by pi-agent-core
@@ -485,6 +489,10 @@ export class AdvisorRuntime {
 	#paused = false;
 	#sessionTransitionPaused = false;
 	#promptInFlight: Promise<void> | undefined;
+	/** True while the drain awaits batch collection (context maintenance). */
+	#collecting = false;
+	/** Set by {@link supersede} for the batch collecting or in flight: it is held, not reviewed. */
+	#superseded = false;
 	#iterationAbort: AbortController | undefined;
 	#backlog = 0;
 	#consecutiveFailures = 0;
@@ -578,6 +586,20 @@ export class AdvisorRuntime {
 				this.agent.setDisableReasoning?.(normalDisableReasoning);
 			}
 		};
+	}
+
+	/**
+	 * Sleep before re-prompting after consecutive failure `attempt` (1-based): `retryDelayMs`
+	 * doubled per failure with downward jitter, raised to a provider retry hint
+	 * (`Retry-After`, `retry-after-ms=…`) carried in the error text. A fixed 1 s retry kept a
+	 * rate-limited router saturated while several sessions retried in lockstep.
+	 */
+	#retryDelayFor(attempt: number, failureText: string): number {
+		if (this.retryDelayMs <= 0) return 0;
+		const backoff = Math.min(this.retryDelayMs * 2 ** (attempt - 1), ADVISOR_RETRY_MAX_DELAY_MS);
+		const jittered = backoff * (1 - Math.random() * ADVISOR_RETRY_JITTER_RATIO);
+		const hint = extractRetryHint(undefined, failureText);
+		return hint === undefined ? jittered : Math.max(jittered, Math.min(hint, ADVISOR_RETRY_MAX_DELAY_MS));
 	}
 
 	get backlog(): number {
@@ -736,6 +758,50 @@ export class AdvisorRuntime {
 	flushHeld(): void {
 		if (this.disposed || this.#quotaExhausted || this.#halted) return;
 		this.#dispatch(undefined);
+	}
+
+	/**
+	 * Cancel every review of the work captured so far that has not judged it:
+	 * queued, collecting, or in flight (its advisor turn is aborted and rolled
+	 * back, so it emits nothing). `keepInFlight` spares the review in flight —
+	 * the one whose verdict is being delivered. Cancelled deltas return to held,
+	 * so the next dispatching boundary reviews them together with newer work.
+	 * Returns whether a review was cancelled.
+	 */
+	supersede(keepInFlight = false): boolean {
+		// A batch carrying a consult is never cancelled: its caller awaits the answer.
+		const inFlight =
+			!keepInFlight &&
+			this.#inFlightConsult === undefined &&
+			(this.#collecting || this.#promptInFlight !== undefined);
+		const deltas = this.#pending.filter((item): item is PendingDelta => item.kind === "delta");
+		if (!inFlight && deltas.length === 0) return false;
+		this.#backlog = Math.max(0, this.#backlog - deltas.reduce((sum, delta) => sum + delta.turns, 0));
+		this.#held = [...deltas.map(delta => ({ ...delta, turns: 1, overflowRecovery: undefined })), ...this.#held];
+		this.#pending = this.#pending.filter(item => item.kind === "consult");
+		if (inFlight) {
+			this.#superseded = true;
+			try {
+				this.agent.abort("advisor review superseded");
+			} catch {}
+		}
+		this.#notifyWaiters();
+		return true;
+	}
+
+	/** Hold a superseded batch ahead of everything captured after it. */
+	#holdSuperseded(text: string, rawMessages: AgentMessage[], turns: number, wip: boolean): void {
+		this.#superseded = false;
+		this.#backlog = Math.max(0, this.#backlog - turns);
+		this.#held.unshift(
+			this.#createPendingDelta(
+				text,
+				1,
+				wip,
+				rawMessages.map(message => ({ ...message })),
+			),
+		);
+		this.#notifyWaiters();
 	}
 
 	/**
@@ -1633,6 +1699,8 @@ export class AdvisorRuntime {
 				this.#inFlightConsult = consult;
 				const batchAlreadyUsedFallback = popped.some(item => item.fallbackAttempted);
 				const recoveringOverflow = popped.some(item => item.overflowRecovery === true);
+				this.#superseded = false;
+				this.#collecting = true;
 
 				// Each delta already opens with a `### Session update` heading, so
 				// join with a blank line rather than a `---` rule. The consultation
@@ -1739,9 +1807,15 @@ export class AdvisorRuntime {
 					turnsCovered += lateDeltas.reduce((sum, item) => sum + item.turns, 0);
 					wip = lateDeltas.at(-1)!.wip;
 				}
+				this.#collecting = false;
 				if (batchInvalidated) {
 					restoreEscalationIfNeeded();
 					if (consult) consult.resolve(this.#clearedResult(consult.attempts));
+					continue;
+				}
+				if (this.#superseded) {
+					restoreEscalationIfNeeded();
+					this.#holdSuperseded(deltasText, rawMessages, turnsCovered, wip);
 					continue;
 				}
 
@@ -1876,6 +1950,7 @@ export class AdvisorRuntime {
 					// Treat that as a failed turn so OpenRouter ZDR-style endpoint
 					// rejections trip the retry/notify path instead of looking like a
 					// successful empty cycle.
+					if (this.#superseded) throw new Error("advisor review superseded");
 					const promptError = this.agent.state.error;
 					if (promptError) throw new Error(promptError);
 					// A content-less stop is a deliberate silent review — the documented
@@ -1956,6 +2031,12 @@ export class AdvisorRuntime {
 						continue;
 					}
 
+					if (this.#superseded) {
+						restoreEscalationIfNeeded();
+						this.#rollbackFailedTurn(messageSnapshot);
+						this.#holdSuperseded(deltaPart, rawMessages, finalTurns, wip);
+						continue;
+					}
 					// Never hold the primary at the advisor catch-up gate while recovery
 					// hooks, retry delay, or provider quota are pending.
 					this.#failing = true;
@@ -2236,11 +2317,15 @@ export class AdvisorRuntime {
 							success = true;
 						} else {
 							requeue();
-							if (this.retryDelayMs <= 0) {
+							const retryDelayMs = this.#retryDelayFor(
+								this.#consecutiveFailures,
+								`${err instanceof Error ? err.message : String(err)} ${terminalFailure?.errorMessage ?? ""}`,
+							);
+							if (retryDelayMs <= 0) {
 								await Bun.sleep(0);
 							} else {
 								try {
-									await raceWithSignal(Bun.sleep(this.retryDelayMs), iterationAbort.signal);
+									await raceWithSignal(Bun.sleep(retryDelayMs), iterationAbort.signal);
 								} catch (sleepError) {
 									if (!iterationAbort.signal.aborted) throw sleepError;
 								}
@@ -2264,6 +2349,7 @@ export class AdvisorRuntime {
 			this.#iterationAbort = undefined;
 			this.#busy = false;
 			this.#inFlightConsult = undefined;
+			this.#collecting = false;
 			// Notify on EVERY path that lands the runtime in the yielded state —
 			// not just an empty backlog. The quota branch requeues the failed
 			// batch (backlog/pending stay non-empty) yet `yielded` is true via

@@ -11,7 +11,8 @@ import type {
 
 /** Native live-run or restored-trace owner; the UI never holds shell syntax. */
 export type ShellVisualizationSource = RunTrace | ShellVisualization;
-const visualizations = new WeakMap<ShellTrace, ShellVisualizationSource>();
+/** Each snapshot's native owner; `null` marks one the engine rejected, so it is not restored again per paint. */
+const visualizations = new WeakMap<ShellTrace, ShellVisualizationSource | null>();
 
 /** Bind the immutable snapshot before publishing it; live paints borrow the actual run. */
 export function attachShellTrace(snapshot: ShellTrace, trace: RunTrace): void {
@@ -20,21 +21,23 @@ export function attachShellTrace(snapshot: ShellTrace, trace: RunTrace): void {
 
 /**
  * Historical traces restore their canonical native archive only once per snapshot.
- * An archive the engine rejects (e.g. sessions persisted before secret redaction
- * stopped rewriting `trace.script`) falls back to a static trace of its script.
+ * `undefined` when the engine rejects the snapshot (e.g. a `tool_result` hook rewrote
+ * `script`); callers then render the plain command and output.
  */
-export function shellVisualization(snapshot: ShellTrace): ShellVisualizationSource {
+export function shellVisualization(snapshot: ShellTrace): ShellVisualizationSource | undefined {
 	let visualization = visualizations.get(snapshot);
-	if (!visualization) {
+	if (visualization === undefined) {
 		try {
 			visualization = new ShellVisualization(JSON.stringify(snapshot));
 		} catch (error) {
-			logger.warn("Shell trace archive cannot be restored; showing static command", { error: String(error) });
-			visualization = new RunTrace(snapshot.script);
+			logger.warn("Stored shell trace cannot be restored; rendering without visualization", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			visualization = null;
 		}
 		visualizations.set(snapshot, visualization);
 	}
-	return visualization;
+	return visualization ?? undefined;
 }
 
 /** Python-like Pseudo, all layers enabled, one pane, live, paused, normal speed. */
@@ -49,16 +52,21 @@ export function defaultShellVizPreferences(): ShellVizPreferences {
 	};
 }
 
-/** Render through native ownership; an explicit replay cursor never uses the normal output sink. */
+/**
+ * Render through native ownership; an explicit replay cursor never uses the normal output sink.
+ * `streaming` marks a command whose arguments are still arriving: its unfinished end draws as it will continue.
+ */
 export function readShellPresentation(
 	source: ShellVisualizationSource,
 	preferences: ShellVizPreferences,
 	snapshot?: ShellTrace,
 	output?: string,
+	streaming = false,
 ): ShellVizPresentation {
 	const options: ShellVizOptions = {
 		...preferences,
 		cursorSeq: preferences.cursor === undefined ? undefined : snapshot?.history?.[preferences.cursor - 1]?.seq,
+		streaming,
 	};
 	const presentation = decodeShellPresentation(source.present(options));
 	if (preferences.cursor === undefined && output !== undefined) presentation.output = output;

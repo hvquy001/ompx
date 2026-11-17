@@ -10,7 +10,6 @@ const TODO_STATUSES: Record<TodoStatus, true> = {
 	pending: true,
 	in_progress: true,
 	completed: true,
-	blocked: true,
 	abandoned: true,
 };
 
@@ -19,9 +18,7 @@ const setTodosSchema = type({
 		phase: type("string").describe("Non-empty phase name."),
 		items: type({
 			content: type("string").describe("Non-empty todo item content."),
-			status: type("'pending' | 'in_progress' | 'completed' | 'blocked' | 'abandoned'").describe(
-				"Todo item status.",
-			),
+			status: type("'pending' | 'in_progress' | 'completed' | 'abandoned'").describe("Todo item status."),
 		}).array(),
 	}).array(),
 });

@@ -165,7 +165,15 @@ export class PeerAgentSession implements AgentSessionHandle {
 	}
 
 	/** Only ever called on the caller's own session; a peer is never that. */
-	drainPendingIrcInboxMessages(_agentId: string, _opts?: { ifAny?: (msg: IrcMessage) => boolean }): IrcMessage[] {
+	hasIrcInterrupts(): boolean {
+		throw new Error(`hasIrcInterrupts must run on the session's home thread (${this.home}), not on a peer handle`);
+	}
+
+	/** Only ever called on the caller's own session; a peer is never that. */
+	drainPendingIrcInboxMessages(
+		_agentId: string,
+		_opts?: Parameters<AgentSessionHandle["drainPendingIrcInboxMessages"]>[1],
+	): IrcMessage[] {
 		throw new Error(
 			`drainPendingIrcInboxMessages must run on the session's home thread (${this.home}), not on a peer handle`,
 		);

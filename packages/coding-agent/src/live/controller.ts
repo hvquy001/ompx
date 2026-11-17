@@ -1,5 +1,7 @@
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { prompt, toError } from "@oh-my-pi/pi-utils";
+import { cfgOffline } from "../config/auxiliary-model-policy";
+import type { Settings } from "../config/settings";
 import type { LiveAgentEndpoint, LiveAgentIdentity, LiveMediaEndpoint } from "./endpoints";
 import liveInstructionsTemplate from "./prompts/live-instructions.md" with { type: "text" };
 import {
@@ -71,6 +73,11 @@ export interface LiveSessionControllerOptions {
 	 * `{ username, firstName, language }` like the bundled prompt.
 	 */
 	instructions?: string;
+	/**
+	 * Throws when the session's current provider must not carry live audio (offline mode allows only
+	 * `openai-codex`). Checked before connecting, on every send, on microphone input, and on model changes.
+	 */
+	assertProviderAllowed?: () => void;
 	/** Control-plane factory; defaults to the Codex live transport. Overridable for tests. */
 	createTransport?: (options: LiveTransportOptions) => LiveControlTransport;
 	/**
@@ -99,6 +106,16 @@ function describeLanguage(tag: string): string {
 	}
 }
 
+/**
+ * Offline mode keeps auxiliary traffic on the session's own provider: live audio is allowed only
+ * while that provider is `openai-codex`. Throws otherwise.
+ */
+export function assertLiveProviderAllowed(session: { settings: Settings; model?: { provider: string } }): void {
+	if (cfgOffline.get(session.settings) && session.model?.provider !== "openai-codex") {
+		throw new Error("Live audio requires the openai-codex session provider in offline mode.");
+	}
+}
+
 /** Coordinates the realtime conversational surface with delegated agent turns. */
 export class LiveSessionController {
 	readonly #media: LiveMediaEndpoint;
@@ -113,6 +130,8 @@ export class LiveSessionController {
 	readonly #sdpOffer: string | undefined;
 
 	#transport: LiveControlTransport | undefined;
+	readonly #transportAbort = new AbortController();
+	readonly #providerGuard: (() => void) | undefined;
 	#sendChain: Promise<void> = Promise.resolve();
 	#stopPromise: Promise<void> | undefined;
 	#started = false;
@@ -146,6 +165,7 @@ export class LiveSessionController {
 		this.#instructionsTemplate = options.instructions ?? liveInstructionsTemplate;
 		this.#createTransport = options.createTransport ?? (opts => new CodexLiveTransport(opts));
 		this.#sdpOffer = options.sdpOffer;
+		this.#providerGuard = options.assertProviderAllowed;
 	}
 
 	/** Current realtime call phase. */
@@ -182,6 +202,7 @@ export class LiveSessionController {
 		}
 
 		try {
+			this.#assertProviderAllowed();
 			this.#media.onOutputLevel(level => this.#guardEvent(() => this.#handleOutputLevel(level)));
 			this.#media.onFailure(message => this.#guardEvent(() => this.#reportFailure(new Error(message))));
 			this.#agent.onContext((delegationId, text, kind) =>
@@ -201,6 +222,7 @@ export class LiveSessionController {
 				voice: this.#voice,
 				media: this.#media,
 				sdpOffer: this.#sdpOffer,
+				signal: this.#transportAbort.signal,
 				callbacks: { onEvent: event => this.#guardEvent(() => this.#handleLiveEvent(event)) },
 			});
 			this.#transport = transport;
@@ -208,6 +230,7 @@ export class LiveSessionController {
 			if (this.#stopped) {
 				throw this.#failure ?? new Error("The live session stopped while connecting.");
 			}
+			this.#assertProviderAllowed();
 			if (this.#muted) await this.#media.setMuted(true);
 			if (this.#stopped) {
 				throw this.#failure ?? new Error("The live session stopped before recording began.");
@@ -237,6 +260,9 @@ export class LiveSessionController {
 
 	async #stop(): Promise<void> {
 		this.#stopped = true;
+		if (this.#phase === "connecting" || !this.#isProviderAllowed()) {
+			this.#transportAbort.abort();
+		}
 		this.#outputActivity.dispose();
 		let cleanupError: Error | undefined;
 
@@ -251,11 +277,14 @@ export class LiveSessionController {
 		this.#transport = undefined;
 		if (transport) {
 			try {
-				await transport.send(buildSessionClose());
+				if (!this.#transportAbort.signal.aborted && this.#isProviderAllowed()) {
+					await transport.send(buildSessionClose());
+				}
 			} catch (cause) {
 				cleanupError ??= toError(cause);
 			}
 			try {
+				this.#transportAbort.abort();
 				await transport.close();
 			} catch (cause) {
 				cleanupError ??= toError(cause);
@@ -282,6 +311,7 @@ export class LiveSessionController {
 	}
 
 	#handleLiveEvent(event: LiveServerEvent): void {
+		this.#assertProviderAllowed();
 		switch (event.type) {
 			case "session.started":
 				// Mute wins over server-driven phases: a remote peer treats any other phase as unmuted.
@@ -320,6 +350,19 @@ export class LiveSessionController {
 		this.#activeDelegationId = event.item.id;
 		this.#refreshAudioPhase();
 		this.#agent.startDelegation(event.item.id, request);
+	}
+
+	#assertProviderAllowed(): void {
+		this.#providerGuard?.();
+	}
+
+	#isProviderAllowed(): boolean {
+		try {
+			this.#assertProviderAllowed();
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	#handleDelegationEnd(delegationId: string): void {
@@ -404,7 +447,10 @@ export class LiveSessionController {
 		if (!transport || this.#stopped) return;
 		this.#sendChain = this.#sendChain
 			.then(async () => {
-				if (!this.#stopped) await transport.send(message);
+				if (!this.#stopped) {
+					this.#assertProviderAllowed();
+					await transport.send(message);
+				}
 			})
 			.catch(cause => this.#reportFailure(toError(cause)));
 	}

@@ -13,6 +13,7 @@ import { AuthStorage } from "../src/session/auth-storage";
 import { SessionManager } from "../src/session/session-manager";
 import type { ToolSession } from "../src/tools";
 import { cfgDuoMode } from "../src/duo/settings";
+import { fixedAdvisorTools } from "./helpers/agent-session-setup";
 
 function makeTool(name: string): AgentTool {
 	return {
@@ -150,7 +151,7 @@ describe("AgentSession live duo/advisor tool availability", () => {
 			toolRegistry: toolsByName,
 			toolSession,
 			builtInToolNames: Array.from(toolsByName.keys()),
-			advisorTools: [],
+			advisorTools: fixedAdvisorTools(),
 		});
 		sessions.push(session);
 		return session;

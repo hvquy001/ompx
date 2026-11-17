@@ -4,38 +4,212 @@
 
 ### Added
 
-- Added opt-in standard Responses WebSockets for catalog-supported models, with incremental turns and session-scoped HTTP/SSE fallback; OMP enables them through settings ([#17354](https://github.com/can1357/oh-my-pi/pull/17354) by [@TatsukiMeng](https://github.com/TatsukiMeng))
-- `AuthStorage` can be constructed over an `AuthStorageBackend` (its namespaces plus `setAccountPolicies`/`replaceStore`/`close`) instead of a credential store, so another thread's instance can serve every call
-- Anthropic sessions on the official API now use message threads (`message-threads-2026-08-12`, as Claude Code does): after the first turn each request sends only the new messages, cutting time to first token in long conversations; a refused or expired thread replays the full conversation automatically. `statefulResponses: false` or `PI_ANTHROPIC_MESSAGE_THREADS=0` turns it off, `PI_ANTHROPIC_MESSAGE_THREADS=1` opts other endpoints in
-- Added the `devin-cli` login, which adopts the Devin CLI's `credentials.toml` seat key as a `devin` API key ([#13637](https://github.com/can1357/oh-my-pi/pull/13637) by [@pavel-kalmykov](https://github.com/pavel-kalmykov))
-- Added the `devin-windsurf` login, which exchanges a Windsurf Enterprise sign-in for the seat's raw API key and stores it as a `devin` API key ([#13288](https://github.com/can1357/oh-my-pi/pull/13288) by [@pavel-kalmykov](https://github.com/pavel-kalmykov))
-- Factory Droid Gemini 4 Argon requests match droid's: no sampling parameters, the output cap at the model maximum, and its earlier turns replayed exactly as Gemini streamed them ([#17861](https://github.com/can1357/oh-my-pi/pull/17861) by [@will-bogusz](https://github.com/will-bogusz))
+- `buildAnthropicSearchHeaders` takes `extraBetas`, request-specific betas sent beside the web search beta ([#18125](https://github.com/can1357/oh-my-pi/pull/18125) by [@will-bogusz](https://github.com/will-bogusz))
+- Added `omitDemotedReasoning` to `StreamOptions`: an Anthropic request leaves out other models' reasoning that it would otherwise replay as text, and a refused request reports how many such blocks it carried in `demotedReasoningBlocks` ([#10407](https://github.com/can1357/oh-my-pi/issues/10407)) ([#17610](https://github.com/can1357/oh-my-pi/pull/17610) by [@will-bogusz](https://github.com/will-bogusz))
 
 ### Fixed
 
-- Fixed account switching stopping after rate-limited accounts when model discovery had not seen every stored account; other eligible accounts are now tried before blocked fallbacks
-- OAuth broker validation now checks optional residency, inference-region, and selected-organization metadata in uploaded credentials and remote snapshots
-- Fixed Muse Code subscription sessions failing every turn with `403 client_attestation_denied` when tools like `bash` or `web_search` were available; Muse Code requests now use tool names Meta accepts and calls still run under their own names ([#17435](https://github.com/can1357/oh-my-pi/issues/17435), [#17515](https://github.com/can1357/oh-my-pi/pull/17515) by [@harshav167](https://github.com/harshav167), continued in [#18053](https://github.com/can1357/oh-my-pi/pull/18053) by [@abilliontokens](https://github.com/abilliontokens))
-- Fixed xAI speech requests failing with `422 missing field language`: `xai-tts` now sends `language`, which xAI's `/v1/tts` requires, defaulting to `auto` (automatic detection) when the caller passes none, as the auth gateway's `/v1/audio/speech` does ([#17992](https://github.com/can1357/oh-my-pi/pull/17992) by [@Mirceone](https://github.com/Mirceone))
-- Fixed Codex WebSocket turns sending a delta `input` after a pooled socket reconnected (closed, idle eviction, token refresh, or prewarm routing-hint change) or when `onPayload` deleted `previous_response_id` (including when it also rewrote the input), and skipped late prewarm while a socket is busy or holding accepted steering ([#17809](https://github.com/can1357/oh-my-pi/pull/17809) by [@xiangnan0811](https://github.com/xiangnan0811)).
-- API-key logins now honor the auth rule's `store-as` provider instead of storing the key under the auth id ([#13637](https://github.com/can1357/oh-my-pi/pull/13637) by [@pavel-kalmykov](https://github.com/pavel-kalmykov))
+- Fenced (```thinking) reasoning with very long unbroken lines no longer slows down as it streams ([#19493](https://github.com/can1357/oh-my-pi/pull/19493) by [@H4vC](https://github.com/H4vC))
+- Fixed Anthropic requests that replay a signed server-compaction block still asking for a message thread, which the API refuses (`thread_unsupported_request`), so every such request first paid a rejected round trip before resending without the thread ([#19473](https://github.com/can1357/oh-my-pi/pull/19473) by [@alphastorm](https://github.com/alphastorm))
+- Anthropic requests whose connection drops before any response now say how long after the request started it dropped and whether the request body was still uploading or had all been written to the socket, with its size, instead of a bare "Connection error." ([#18624](https://github.com/can1357/oh-my-pi/pull/18624) by [@will-bogusz](https://github.com/will-bogusz))
+- Fixed Anthropic requests dropping the reasoning of earlier non-Claude turns signed in under another credential, or kept through a compaction; it is now replayed like other models' reasoning ([#7241](https://github.com/can1357/oh-my-pi/issues/7241)) ([#17610](https://github.com/can1357/oh-my-pi/pull/17610) by [@will-bogusz](https://github.com/will-bogusz))
+
+## [18.22.0] - 2026-11-16
+
+### Fixed
+
+- Fixed slow streaming of Gemma tool calls with large arguments.
+
+## [18.21.0] - 2026-11-16
+
+### Added
+
+- Added automatic detection of thinking capabilities for previously unknown models, with persistent results and support for alternate effort and token-budget request formats.
+
+## [18.20.3] - 2026-11-16
+
+### Breaking Changes
+
+- Removed the public `isXdDevicePath` export from `providers/cursor-pi-args`. Ranged reads of `xd://` documents now use the standard line-selector behavior.
+
+### Fixed
+
+- Fixed rate-limit handling for Mistral and other OpenAI-compatible providers so requests with no available allowance fail immediately with an actionable error suggesting a model or plan change.
+- Fixed Anthropic OAuth requests for pooled Claude accounts to report accurate device and account information, including after credentials are rotated during a request.
+
+## [18.20.2] - 2026-11-14
+
+### Added
+
+- Added the Antigravity CLI ACP provider with managed installation, Google sign-in, refreshable distributed credentials, host tools, and retained conversations across tool steps and history changes.
+
+## [18.20.1] - 2026-11-14
+
+### Added
+
+- Added `setUnpausedProviders()` to `@oh-my-pi/pi-ai/oauth`, allowing applications to re-enable providers paused by authentication rules; loaded credential pools and extension logins recognize the change on their next read.
 
 ### Changed
 
-- Switching into or out of the Codex `ultrafast` service tier now opens a fresh WebSocket routed to the new tier instead of reusing the old one ([#17809](https://github.com/can1357/oh-my-pi/pull/17809) by [@xiangnan0811](https://github.com/xiangnan0811)).
-- Factory Droid requests now identify as droid 1.1.0: they no longer carry SDK telemetry (`X-Stainless-*`), a placeholder `x-api-key` or Claude Code's `x-app` and browser-access headers, and login asks whoami for its extended response ([#17885](https://github.com/can1357/oh-my-pi/pull/17885) by [@will-bogusz](https://github.com/will-bogusz))
+- Updated Vertex AI Gemini requests to use the v1beta1 API, restoring support for long Gemini responses.
+- Improved Google Antigravity quota recovery so Gemini 4 Argon access can resume after quota or plan changes when shared Gemini capacity is available.
+- Improved Amazon Bedrock region selection to honor a configured regional endpoint before falling back to `us-east-1`.
+
 ### Fixed
 
-- Fixed Gemini and Vertex `MALFORMED_RESPONSE` finishes showing as "Unhandled stop reason" and dropping that turn's token usage; RPC prompt errors now report them as retryable
+- Fixed Gemini 4 responses that exceed a single output segment across Google, Vertex AI, Gemini CLI, and Antigravity, ensuring long responses continue generating and are delivered as one complete reply.
+- Fixed Cursor conversations so hook-added prompt content remains in the current user message and conversation context is correctly preserved across turns.
+- Fixed Amazon Bedrock streaming so malformed responses fail promptly and interrupted responses are retried rather than treated as complete.
+- Fixed Claude account recovery when usage reports contain only one shared usage window.
+- Fixed OpenRouter conversations with Kimi and DeepSeek so reasoning context is preserved when switching models.
+- Fixed Xiaomi MiMo Token Plan authentication to use the correct regional endpoint, including for models loaded from bundled or cached configuration.
+- Fixed Perplexity sign-in in the login flow and setup wizard, including email-code and browser-based SSO authentication.
+- Stopped native judges from retrying gateway errors caused by exhausted upstream credentials while retaining retries for other transient 502 errors.
+- Fixed simple completion and authenticated gateway chat routes so supported providers receive stop-sequence and frequency-penalty settings.
+- Fixed Muse sessions after credential changes, key rotation, or idle resume so subsequent turns can continue normally.
+
+## [18.20.0] - 2026-11-12
+
+### Added
+
+- Added the `google-decisions` judgment API for Google's Gemini Decisions API (`gemini-decision-1`), with text and image input ([#19060](https://github.com/can1357/oh-my-pi/pull/19060) by [@kevcube](https://github.com/kevcube))
+- Added `apiKey` to successful `OAuthAccessResolution` results from `oauth.accessById()` and `oauth.accessAll()`: the key normal requests send for that account, which differs from `accessToken` for providers with structured credentials ([#19030](https://github.com/can1357/oh-my-pi/pull/19030) by [@Xytronix](https://github.com/Xytronix))
+- Added an optional `exemptionAlias` to `ToolCallLoopGuard` so transport calls can match the dispatched tool's name in `exemptTools` ([#18860](https://github.com/can1357/oh-my-pi/issues/18860))
+- Added the `liquid-systemone` judgment API for Liquid AI's decision models, which rejects image sets over Liquid's 10,000 32×32-patch request cap before sending ([#18076](https://github.com/can1357/oh-my-pi/issues/18076), [#18100](https://github.com/can1357/oh-my-pi/pull/18100) by [@SuperUserA](https://github.com/SuperUserA))
+- Added the `nace-systemone` judgment API for Nace's Drex decision models, which sends images as Drex's top-level `images` data URLs and replaces the base64 image, audio, video and PDF data URLs that Drex rejects in judged text with a description ([#18950](https://github.com/can1357/oh-my-pi/pull/18950) by [@alphastorm](https://github.com/alphastorm))
+
 ### Fixed
 
-- Fixed `rerank()` rejecting Cohere-style answers that carry no `model` field; the result then reports the requested model id ([#17975](https://github.com/can1357/oh-my-pi/pull/17975) by [@breakwaterlabs](https://github.com/breakwaterlabs))
+- Fixed a spent Codex account retrying every minute for days when its siblings were only refused the requested model: their short model-policy blocks no longer count as a sibling becoming available, so the usage-limit wait follows the spent account's reset and model fallback can take over ([#17637](https://github.com/can1357/oh-my-pi/issues/17637), [#19019](https://github.com/can1357/oh-my-pi/pull/19019) by [@wolfiesch](https://github.com/wolfiesch))
+- Auth-gateway client tokens (`serve --clients`) can no longer set who a request is from, who pays, or how the gateway reaches the provider: chat routes drop their request headers, `userProfileId`, `initiatorOverride`, `metadata`, `serviceTier`, `cacheRetention` and the other gateway-only options, while the gateway token keeps them ([#19067](https://github.com/can1357/oh-my-pi/pull/19067) by [@alphastorm](https://github.com/alphastorm))
+- Fixed the auth gateway's `/v1/pi/stream` dropping `taskBudget`, `include` and `anthropicPrefixMismatchBehavior`, which its other chat routes accept ([#19067](https://github.com/can1357/oh-my-pi/pull/19067) by [@alphastorm](https://github.com/alphastorm))
+- Fixed requests to Vertex AI Mistral partner models (`mistral-medium-3`, `mistral-small-2503`, `codestral-2`) failing because they were sent in Anthropic's request format ([#19010](https://github.com/can1357/oh-my-pi/issues/19010), [#19022](https://github.com/can1357/oh-my-pi/pull/19022) by [@yuzu-octopus](https://github.com/yuzu-octopus))
+- Added Gemini's `xhigh` thinking level, sent on the Gemini API and Vertex for models whose ladder exposes it (Gemini 4 Hydrogen).
+- Fixed omp failing to start with `ENOTDIR: not a directory, stat '~/.aws/credentials'` when `~/.aws` is a file instead of a directory ([#19083](https://github.com/can1357/oh-my-pi/pull/19083) by [@iamshatter](https://github.com/iamshatter))
+
+## [18.19.0] - 2026-11-12
+
+### Added
+
+- Added the `liquid-systemone` judgment API for Liquid AI decision models, including validation that rejects image sets exceeding Liquid’s 10,000 32×32-patch request limit before submission.
+
 ### Fixed
 
-- Fixed `rerank()` requests leaving out the model's configured headers, including `models.yml` `headers`, so a rerank endpoint that needs its own header or `Authorization` rejected every call ([#17974](https://github.com/can1357/oh-my-pi/pull/17974) by [@breakwaterlabs](https://github.com/breakwaterlabs))
+- Fixed Gemini CLI and Antigravity responses losing or misordering thought signatures and reply text, including responses that follow tool calls.
+- Fixed Gemini CLI and Antigravity merging reply text around a thought signature, dropping signatures at the start of a reply or after a tool call, and placing a thought ahead of reply text that streamed before it ([#18942](https://github.com/can1357/oh-my-pi/pull/18942) by [@JustasMasiulis](https://github.com/JustasMasiulis))
+- Fixed Google Antigravity judging Gemini models by quota buckets they do not consume: Gemini 3.x requests ignore the Gemini 4 Argon weekly bucket, and Argon requests ignore `gemini-weekly`, so an exhausted or low bucket no longer blocks, reserves, or caps an account for the other models ([#16104](https://github.com/can1357/oh-my-pi/issues/16104)).
+
+## [18.18.9] - 2026-11-11
+
+- Fixed Anthropic OAuth turns ending on a model-specific `404 not_found_error` instead of switching to another logged-in Anthropic account that serves the model while keeping the denied account available for other models ([#18799](https://github.com/can1357/oh-my-pi/issues/18799), [#18807](https://github.com/can1357/oh-my-pi/pull/18807) by [@alphastorm](https://github.com/alphastorm))
+
+### Added
+
+- Added `SOFYA_API_KEY` as the env key for the `sofya` provider ([#18185](https://github.com/can1357/oh-my-pi/pull/18185) by [@yusufgurdogan](https://github.com/yusufgurdogan))
+
 ### Fixed
 
-- The OpenAI-wire transport and provider-level retry loops (OpenAI Responses, Anthropic) no longer replay a response marked `x-should-retry: false`, so a retrying gateway's terminal 5xx is no longer multiplied by in-provider retries ([#17920](https://github.com/can1357/oh-my-pi/issues/17920))
+- Devin requests no longer send `temperature: 0`: the catalog's `temperature-floor` raises it to `0.0001`, so session titles and Mnemopi memory extraction work on Devin instead of failing with Cascade's opaque `invalid_argument` and silently falling back to another model ([#18423](https://github.com/can1357/oh-my-pi/issues/18423))
+- Auth-gateway `/v1/messages` now answers `400 invalid_request_error` for `output_config.format` (and the pre-GA `output_format`) instead of returning 200 with output the schema never constrained, so structured-output clients fall back to prompt-side schemas ([#18842](https://github.com/can1357/oh-my-pi/issues/18842))
+- Auth-gateway requests denied only the requested model (Codex ChatGPT account, Cursor plan) now switch to another account and keep the denied one usable for other models, instead of marking a working credential suspect; gateway rotation now follows the same rules as local sessions, including waiting out a sibling's short usage block
+
+## [18.18.8] - 2026-11-11
+
+- Fixed provider in-flight lock cleanup failures being swallowed silently — they are now logged instead of ignored ([#18654](https://github.com/can1357/oh-my-pi/pull/18654) by [@yuzu-octopus](https://github.com/yuzu-octopus))
+- Fixed Claude account-wide usage blocks outliving recovery when the account has no running 5-hour window: `/usage` answers `five_hour: null` with no `session` row, and healing and saved-reset clearing treated that as an incomplete report, so a stale block idled a healthy account until its weekly reset and could leave a turn with no account to switch to after a real 429 ([#18801](https://github.com/can1357/oh-my-pi/pull/18801) by [@baekjosh](https://github.com/baekjosh))
+- A usage-limited request now moves to another account whose old block live usage shows has lifted, instead of ending the turn because every other account looked blocked ([#18801](https://github.com/can1357/oh-my-pi/pull/18801))
+
+### Fixed
+
+- Fixed concurrent OAuth requests rejected as `claude_code_version_too_old` failing instead of retrying with the required version ([#18651](https://github.com/can1357/oh-my-pi/issues/18651))
+- Chat Completions gateway requests preserve explicit tool strict-mode choices, so Codex tools can omit optional arguments when callers set `strict: false` ([#18672](https://github.com/can1357/oh-my-pi/pull/18672) by [@0xeb](https://github.com/0xeb)).
+
+## [18.18.7] - 2026-11-10
+
+### Added
+
+- LiteLLM usage adapter (`@oh-my-pi/pi-ai/usage/litellm`) reporting a gateway's key and user USD budgets ([#17873](https://github.com/can1357/oh-my-pi/pull/17873) by [@maykonmichel](https://github.com/maykonmichel))
+- `UsageApi.replaceConfiguredProviders` registers configuration-sourced usage providers between runtime overrides and the built-in resolver, and `UsageProvider.usesRequestKey` makes aggregate usage probe only the key inference would send ([#17873](https://github.com/can1357/oh-my-pi/pull/17873) by [@maykonmichel](https://github.com/maykonmichel))
+
+### Changed
+
+- Providers with a `login-warning` auth rule show their account risk before a new login and start it only after the user answers `yes`; any other answer or a cancel stores nothing, and their login-list entry is marked "(at your own risk)" ([#18499](https://github.com/can1357/oh-my-pi/issues/18499))
+
+### Fixed
+
+- Claude Fable launch resets now report the Fable weekly limit they clear instead of an unknown window ([#18661](https://github.com/can1357/oh-my-pi/pull/18661) by [@TheAifam5](https://github.com/TheAifam5))
+
+## [18.18.4] - 2026-11-09
+
+### Added
+
+- Added the `base64SkipThoughtSignature` compat flag so Gemini gateways that decode `thoughtSignature` as base64 (such as the Hyperspace AI LLM proxy) can receive the unsigned-tool-call bypass sentinel without rejecting the request with a 400 ([#18586](https://github.com/can1357/oh-my-pi/pull/18586) by [@tuandinh0801](https://github.com/tuandinh0801)).
+
+### Changed
+
+- Providers paused by a `disabled` auth rule (currently Google Antigravity) are left out of the built-in login list, refuse login, token refresh and usage probes, resolve no key from any source, and refuse requests and image generation with the pause reason; stored logins are kept and work again once the rule is removed, and an extension that registers its own login under the paused id takes it back ([#18622](https://github.com/can1357/oh-my-pi/pull/18622) by [@H4vC](https://github.com/H4vC))
+
+### Fixed
+
+- Exclusive tools (`edit`, `write`, `eval`, …) called as Cursor MCP tools now keep their place in the tool batch, so a shell or read sent with an edit no longer runs against the old file or starts before an earlier call finishes ([#18502](https://github.com/can1357/oh-my-pi/pull/18502) by [@eggpeat](https://github.com/eggpeat))
+
+## [18.18.2] - 2026-11-08
+
+### Added
+
+- Added edit execution context support for Cursor handlers, allowing integrations to identify frames that materialize native file edits and detect when server-side edits have settled.
+- Exported Responses replay utilities so callers can determine which turns are sent as native payload items when estimating or trimming context.
+
+### Fixed
+
+- Fixed rotated credential pools reporting a stale sibling credential's authentication error instead of the exhausted credential's usage-limit status and reset time.
+- Fixed OpenAI image edits with multiple input images failing because image parameters were duplicated.
+- Fixed Cursor-provider reads of xd:// devices failing due to incorrect device URL handling.
+- Fixed Anthropic sessions getting stuck after refused turns containing thinking or redacted-thinking blocks when followed by a steer, reminder, or new prompt.
+- Fixed Codex Responses requests losing tool namespaces and developer-provided additional tools when replayed through the authentication gateway.
+- Fixed Gemini malformed responses being treated as unhandled stop reasons and losing token usage; they are now handled as transient transport errors.
+- Improved Cursor compatibility with TLS-intercepting proxies that block HTTP/2 by falling back to HTTP/1 for subsequent turns.
+
+## [18.18.1] - 2026-11-08
+
+### Fixed
+
+- Cursor exec frames keep tool-batch order: a file mutation (native StrReplace and Write, `write`, `delete`, `pi_edit`, `pi_write`) waits for the calls issued before it, and the calls issued after it wait until it lands, so a Shell sent in the same batch as a StrReplace no longer runs before the edit's write ([#18434](https://github.com/can1357/oh-my-pi/pull/18434) by [@KadirBerkpolat1](https://github.com/KadirBerkpolat1))
+- ChatGPT Pro Max (`promax`) counts as Pro for Codex account routing, so a blocked Pro account no longer wins over an open or pinned Pro Max account ([#18399](https://github.com/can1357/oh-my-pi/pull/18399) by [@serverinspector](https://github.com/serverinspector))
+- Cursor Shell results no longer end with `Timeout clamped to 3600s (requested 86400s; …)`: Cursor's 24 h `hard_timeout` is capped at the bash tool's 3600 s ceiling before it reaches the tool ([#18433](https://github.com/can1357/oh-my-pi/pull/18433) by [@KadirBerkpolat1](https://github.com/KadirBerkpolat1))
+- A 429 or 402 worded like a context overflow (Bedrock's "429 Too many tokens, please wait…") is treated as a rate limit, so it retries and walks the fallback chain instead of compacting ([#18345](https://github.com/can1357/oh-my-pi/pull/18345) by [@nick-maderight](https://github.com/nick-maderight))
+- `auth-gateway stdio` and `serve` no longer reject credentialless Apple on-device models ([#18370](https://github.com/can1357/oh-my-pi/issues/18370))
+
+## [18.17.0] - 2026-11-06
+
+### Added
+
+- Added opt-in standard Responses WebSockets for catalog-supported models, with incremental turns and automatic HTTP/SSE fallback; enable through OMP settings ([#17354](https://github.com/can1357/oh-my-pi/pull/17354) by [@TatsukiMeng](https://github.com/TatsukiMeng))
+- `AuthStorage` can now be constructed over an `AuthStorageBackend` instead of a credential store, so another thread's instance can serve every call
+- Anthropic official-API sessions use message threads, sending only new messages per turn for faster first tokens; toggle with `statefulResponses: false` or `PI_ANTHROPIC_MESSAGE_THREADS=0`/`1`
+- Added `devin-cli` (Devin CLI seat key) and `devin-windsurf` (Windsurf Enterprise sign-in) logins, both stored as a `devin` API key ([#13637](https://github.com/can1357/oh-my-pi/pull/13637) by [@pavel-kalmykov](https://github.com/pavel-kalmykov), [#13288](https://github.com/can1357/oh-my-pi/pull/13288) by [@pavel-kalmykov](https://github.com/pavel-kalmykov))
+- Factory Droid Gemini 4 Argon requests now match Droid's request and conversation handling ([#17861](https://github.com/can1357/oh-my-pi/pull/17861) by [@will-bogusz](https://github.com/will-bogusz))
+
+### Changed
+
+- Changing the Codex ultrafast service tier now opens a connection for the selected tier, so requests route correctly
+- Factory Droid requests and login now match the current Droid client
+- Codex HTTP requests (turns, compaction, image generation, web search, model discovery) no longer send `OpenAI-Beta: responses=experimental`, matching the official Codex client
+
+### Fixed
+
+- Fixed account switching stopping at rate-limited accounts; other eligible stored accounts are now tried first
+- Fixed OpenRouter Decisions judges ignoring `compat.openRouterRouting` and `compat.extraBody`, including `@provider` pins ([#18140](https://github.com/can1357/oh-my-pi/issues/18140))
+- OAuth broker now validates residency, inference-region, and selected-organization metadata in uploaded credentials and remote snapshots
+- Fixed Muse Code subscription sessions failing with `403 client_attestation_denied` when tools were available ([#17435](https://github.com/can1357/oh-my-pi/issues/17435), [#17515](https://github.com/can1357/oh-my-pi/pull/17515) by [@harshav167](https://github.com/harshav167), continued in [#18053](https://github.com/can1357/oh-my-pi/pull/18053) by [@abilliontokens](https://github.com/abilliontokens))
+- Fixed `xai-tts` failing with `422 missing field language`; `language` now defaults to `auto` ([#17992](https://github.com/can1357/oh-my-pi/pull/17992) by [@Mirceone](https://github.com/Mirceone))
+- Fixed Codex WebSocket turns sending malformed incremental input after reconnects or `onPayload` edits, and prewarming busy sockets ([#17809](https://github.com/can1357/oh-my-pi/pull/17809) by [@xiangnan0811](https://github.com/xiangnan0811))
+- API-key logins now store keys under the auth rule's `store-as` provider ([#13637](https://github.com/can1357/oh-my-pi/pull/13637) by [@pavel-kalmykov](https://github.com/pavel-kalmykov))
+- Fixed `openai-responses`, Codex, and Muse Code continuations after an output limit cut a tool call, including reasoning-first models ([#17847](https://github.com/can1357/oh-my-pi/issues/17847), [#18189](https://github.com/can1357/oh-my-pi/pull/18189) by [@mttzzz](https://github.com/mttzzz))
+- Gemini and Vertex malformed-response finishes now report the correct stop reason and keep token usage; RPC prompt errors are reported as retryable
+- Fixed reranking when Cohere-compatible responses omit the model field
+- Reranking requests now send configured model headers, including custom `Authorization`
+- Provider retries no longer retry responses explicitly marked non-retryable
 
 ## [18.16.0] - 2026-11-02
 
@@ -2827,3 +3001,4 @@
 Older entries are archived in [packages/ai/CHANGELOG.md@fcdd88ed8aca](https://github.com/can1357/oh-my-pi/blob/fcdd88ed8aca4ac5b7510b309334c5a2a5364008/packages/ai/CHANGELOG.md).
 Older entries are archived in [packages/ai/CHANGELOG.md@7a5f1425b9bd](https://github.com/can1357/oh-my-pi/blob/7a5f1425b9bd79c3c74ae1d8946782b0494c8aa9/packages/ai/CHANGELOG.md).
 Older entries are archived in [packages/ai/CHANGELOG.md@9e9150960c24](https://github.com/can1357/oh-my-pi/blob/9e9150960c248708f8cc4bfdae0c8f2aaf3480b0/packages/ai/CHANGELOG.md).
+Older entries are archived in [packages/ai/CHANGELOG.md@80ad1d6b2eb3](https://github.com/can1357/oh-my-pi/blob/80ad1d6b2eb3dd916d863841dcae79f4f96c5612/packages/ai/CHANGELOG.md).

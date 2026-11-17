@@ -111,7 +111,7 @@ function makeSession(opts: {
 		agent: { state: { tools: opts.tools ?? [] } },
 		skills: opts.skills ?? [],
 		model,
-		modelRegistry: { isUsingOAuth: () => false },
+		modelRegistry: { isUsingSubscription: () => false },
 		settings: opts.settings ?? settings,
 		state: { messages, streamMessage: opts.streamMessage ?? null, model },
 		sessionManager: {

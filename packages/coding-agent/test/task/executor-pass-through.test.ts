@@ -212,21 +212,21 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 			id: "default-tools-child",
 			agent: { ...baseAgent, ...absentFields },
 		});
-		const unstructuredResult = await runSubprocess({
+		const structuredResult = await runSubprocess({
 			...baseOptions,
-			id: "unstructured-empty-tools-child",
+			id: "structured-empty-tools-child",
 			agent: { ...baseAgent, ...emptyFields },
-			structured: false,
+			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
 		});
 
 		expect(emptyResult.exitCode).toBe(0);
 		expect(absentResult.exitCode).toBe(0);
-		expect(unstructuredResult.exitCode).toBe(0);
-		// Fork contract: with task.structured (default) an explicit empty list is yield-only;
-		// hub is never auto-added. A schema-less run (`structured: false`) never gets `yield`.
-		expect(spy.mock.calls[0]?.[0]?.toolNames).toEqual(["yield"]);
+		expect(structuredResult.exitCode).toBe(0);
+		// Fork contract: a schema-less run never gets `yield`, so an explicit empty list stays empty;
+		// with an output schema an explicit empty list is yield-only. Hub is never auto-added.
+		expect(spy.mock.calls[0]?.[0]?.toolNames).toEqual([]);
 		expect(spy.mock.calls[1]?.[0]?.toolNames).toBeUndefined();
-		expect(spy.mock.calls[2]?.[0]?.toolNames).toEqual([]);
+		expect(spy.mock.calls[2]?.[0]?.toolNames).toEqual(["yield"]);
 	});
 
 	it("grants wait only to unrestricted subagents that can start background work, and requires write for peers", async () => {
@@ -419,6 +419,7 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		const mcpManager = {
 			getTools: () => [{ name: "mcp__private_read", label: "private/read" }],
 			addToolsChangedListener: () => () => {},
+			openToolScope: () => {},
 		} as unknown as MCPManager;
 
 		const result = await runSubprocess({ ...baseOptions, id: "normal-child", mcpManager });

@@ -105,9 +105,9 @@ function createSessionHarness(lastAssistantMessage?: AssistantMessage): SessionH
 		waitForIdle: () => idle.promise,
 		getLastAssistantMessage: () => lastAssistantMessage,
 		hasPendingAgentWork: () => pending,
-		hasPendingAsyncWork: () => false,
+		isRunActive: false,
 		getAsyncJobSnapshot: () => null,
-		settleAsyncWork: async () => {},
+		waitForRunEnd: async () => {},
 		sendUserMessage: async content => {
 			notices.push(typeof content === "string" ? content : JSON.stringify(content));
 		},

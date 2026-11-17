@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
+import * as os from "node:os";
 import * as path from "node:path";
 import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import { getBrowserProfilesDir, isRecord, untilAborted } from "@oh-my-pi/pi-utils";
@@ -371,27 +372,19 @@ function normalizeCandidateArgs(args: string[]): string[] {
 }
 
 /**
- * Fallback discovery through Chromium's own process singleton lock.
- *
- * A distro launcher — Arch's `/usr/bin/chromium` shim, a Flatpak export —
- * `exec`s the real browser binary, so the running process image is not the
- * launch path the caller passed and `Process.fromPath` cannot see it. The
- * profile's `SingletonLock` symlink is Chromium's record of which process owns
- * it (`<hostname>-<pid>`), which is the identity that matters here: reusable
- * sessions are matched by profile, and only one process can hold a profile's
- * singleton. Every field is re-verified (pid alive, argv names the same
- * profile, port answers) so a stale lock or a recycled pid cannot attach the
- * caller to an unrelated browser.
+ * The live Chromium-family browser holding a profile, whatever executable it
+ * runs: a compiled launcher (Arch's /usr/bin/chromium) execs a binary whose
+ * path neither realpath nor {@link resolveWrapperTarget} can derive. POSIX
+ * Chromium links `<profile>/SingletonLock` to `<hostname>-<pid>`; the owner must
+ * still name the profile in its argv, so a stale lock whose pid was recycled is ignored.
  */
-async function findReusableCdpByProfileOwner(
+async function findProfileLockOwner(
 	normalizedUserDataDir: string,
-	signal?: AbortSignal,
-): Promise<{ cdpUrl: string; pid: number } | null> {
-	if (process.platform === "win32") return null;
-	const lockTarget = await fs.readlink(path.join(normalizedUserDataDir, "SingletonLock")).catch(() => null);
-	const lockPid = lockTarget === null ? undefined : /-(\d+)$/.exec(lockTarget)?.[1];
-	if (lockPid === undefined) return null;
-	const owner = Process.fromPid(Number.parseInt(lockPid, 10));
+): Promise<{ owner: Process; executable: string } | null> {
+	const lock = await fs.readlink(path.join(normalizedUserDataDir, "SingletonLock")).catch(() => null);
+	const match = lock ? /^(.+)-(\d+)$/.exec(lock) : null;
+	if (!match || match[1] !== os.hostname()) return null;
+	const owner = Process.fromPid(Number(match[2]));
 	if (!owner || owner.status() !== ProcessStatus.Running) return null;
 	let args: string[];
 	try {
@@ -399,18 +392,12 @@ async function findReusableCdpByProfileOwner(
 	} catch {
 		return null;
 	}
-	const ownerProfile = findUserDataDirInArgs(args);
-	if (
-		ownerProfile === null ||
-		!path.isAbsolute(ownerProfile) ||
-		normalizeUserDataDir(ownerProfile) !== normalizedUserDataDir
-	) {
-		return null;
-	}
-	const port = findCdpPortInArgs(args);
-	if (port === null) return null;
-	if (!(await probeCdpAt(port, signal))) return null;
-	return { cdpUrl: `http://127.0.0.1:${port}`, pid: owner.pid };
+	const executable = args[0];
+	if (!executable || !isChromiumBrowserExecutable(executable)) return null;
+	const profile = findUserDataDirInArgs(args);
+	return profile !== null && path.isAbsolute(profile) && normalizeUserDataDir(profile) === normalizedUserDataDir
+		? { owner, executable }
+		: null;
 }
 
 /**
@@ -436,6 +423,22 @@ export async function findReusableCdp(
 	const candidates = Process.fromPath(wrapperTarget ?? executablePath).filter(
 		candidate => candidate.status() === ProcessStatus.Running,
 	);
+	if (isChromium && normalizedRequestedUserDataDir !== null) {
+		const holder = await findProfileLockOwner(normalizedRequestedUserDataDir);
+		if (holder && !candidates.some(candidate => candidate.pid === holder.owner.pid)) {
+			// Adopt only the requested browser under another path; a different browser
+			// on this profile is not what the caller asked for.
+			const [holderName, ...names] = [holder.executable, exe, executablePath, wrapperTarget ?? exe].map(file =>
+				path.basename(file).replace(/\.exe$/i, ""),
+			);
+			if (!names.includes(holderName!)) {
+				throw new ToolError(
+					`Cannot launch ${path.basename(exe)} because its profile ${requestedUserDataDir} is held by another browser, ${holder.executable} (pid ${holder.owner.pid}). Close that browser, choose another --user-data-dir, or pass its CDP endpoint URL as app.`,
+				);
+			}
+			candidates.push(holder.owner);
+		}
+	}
 	const candidateArgs: string[][] = [];
 	let hasUnreadableCandidate = false;
 	for (const process of candidates) {
@@ -463,13 +466,6 @@ export async function findReusableCdp(
 			return { cdpUrl: `http://127.0.0.1:${port}`, pid: process.pid };
 		}
 	}
-	// Nothing matched by process image path. A launcher-wrapped browser is the
-	// one case `fromPath` structurally cannot cover, so the requested profile's
-	// own singleton lock gets the last word before we decide to launch.
-	if (normalizedRequestedUserDataDir !== null) {
-		const owner = await findReusableCdpByProfileOwner(normalizedRequestedUserDataDir, options.signal);
-		if (owner) return owner;
-	}
 	const canLaunchIsolatedProfile =
 		normalizedRequestedUserDataDir !== null &&
 		!hasUnreadableCandidate &&
@@ -484,7 +480,7 @@ export async function findReusableCdp(
 	if (!canLaunchIsolatedProfile && candidates.length > 0) {
 		const name = path.basename(exe);
 		throw new ToolError(
-			`Cannot launch ${name} because it is already running without a reusable CDP endpoint. Close ${name}, relaunch it with --remote-debugging-port, or pass app.cdp_url for an existing endpoint.`,
+			`Cannot launch ${name} because it is already running without a reusable CDP endpoint. Close ${name}, relaunch it with --remote-debugging-port, or pass its CDP endpoint URL as app.`,
 		);
 	}
 	return null;
@@ -598,7 +594,7 @@ async function fetchRelayEntries(
 	}
 }
 
-/** A relay page `app.target` may pick: not discarded by Chrome, and not internal (devtools, service workers…). */
+/** A relay page `target` may pick: not discarded by Chrome, and not internal (devtools, service workers…). */
 function isAdoptableRelayEntry(entry: RelayJsonEntry): boolean {
 	return (
 		entry.discarded !== "true" &&
@@ -607,9 +603,9 @@ function isAdoptableRelayEntry(entry: RelayJsonEntry): boolean {
 	);
 }
 
-/** One of the user's Chrome tabs as `browser.targets()` lists it: `app.target` adopts it by `target` (its URL). */
+/** One of the user's Chrome tabs as `browser.targets()` lists it: its `target` (the URL) adopts it. */
 export interface RelayTarget {
-	/** The page URL, as `app.target` takes it (a URL/title substring). */
+	/** The page URL, as `target` takes it (a URL/title substring). */
 	target: string;
 	title: string;
 	url: string;
@@ -642,7 +638,7 @@ export function describeRelayTargets(targets: readonly RelayTarget[]): string {
 	const list = targets
 		.map(entry => `- ${JSON.stringify(entry.title)} ${entry.url}${entry.shown ? " (active)" : ""}`)
 		.join("\n");
-	return `Chrome pages via the relay (adopt one with app.target set to its URL or a title substring):\n${list}`;
+	return `Chrome pages via the relay (adopt one with target set to its URL or a title substring):\n${list}`;
 }
 
 /** The pages of the user's Chrome the relay at `relayJson` can adopt. */
@@ -673,7 +669,7 @@ function selectRelayEntry(entries: RelayJsonEntry[], options: PickTargetOptions)
 		}
 		const summary = entries.map(e => `- ${e.id}  ${e.title || "(untitled)"}  ${e.url}`).join("\n");
 		throw new ToolError(
-			`No page target matched ${JSON.stringify(options.matcher)} after waiting ${RELAY_MATCH_SETTLE_MS / 1000}s for a newly opened tab. Pass a target id, URL or title substring (browser.targets() lists URLs before adopting), or omit it to use the active tab. Available pages:\n${summary}`,
+			`No page target matched ${JSON.stringify(options.matcher)} after waiting ${RELAY_MATCH_SETTLE_MS / 1000}s for a newly opened tab. Pass a target id, URL or title substring (browser.targets() lists URLs before adopting), or omit target to open omp's own tab, with url to load the page there. Available pages:\n${summary}`,
 		);
 	}
 	const usable = entries.filter(isAdoptableRelayEntry);

@@ -58,11 +58,12 @@ import { resolveConfigValue } from "../config/resolve-config-value";
 import type { Settings } from "../config/settings";
 import {
 	type AuthBrokerClientConfig,
+	applyUnpausedProviders,
 	loadEffectiveAuthAccountPolicyConfig,
 	resolveAuthBrokerConfig,
 	resolveEffectiveSettings,
 } from "../session/auth-broker-config";
-import { runAuthGatewayStdio } from "./auth-gateway-stdio";
+import { GATEWAY_MODEL_KINDS, runAuthGatewayStdio } from "./auth-gateway-stdio";
 import { generateToken, readTokenFile, writeTokenFile } from "./token-file";
 
 export type AuthGatewayAction = "serve" | "stdio" | "token" | "status" | "check";
@@ -317,25 +318,6 @@ export function createAuthGatewayClientsReloader(
 	};
 }
 
-/**
- * Catalog kinds the gateway has a route for: chat (`/v1/chat/completions`,
- * `/v1/messages`, `/v1/responses`, `/v1/pi/stream`), judge (`/v1/systemone`),
- * image (`/v1/images/*`), tts (`/v1/audio/speech`), stt
- * (`/v1/audio/transcriptions`), embedding (`/v1/embeddings`), rerank
- * (`/v1/rerank`), video (`/v1/videos/*`). Other kinds (tiny, search) have no
- * wire and stay off the served catalog so `/v1/models` never advertises them.
- */
-const GATEWAY_MODEL_KINDS: readonly ModelKind[] = [
-	"chat",
-	"judge",
-	"image",
-	"tts",
-	"stt",
-	"embedding",
-	"rerank",
-	"video",
-];
-
 /** Every registry model of a kind the gateway can route, bundled catalog order within each kind. */
 export function gatewayRoutableModels(registry: ModelRegistry): Model<Api>[] {
 	const models: Model<Api>[] = [];
@@ -484,6 +466,7 @@ async function createBrokerCredentialSource(
 	// in sdk.ts. The gateway never touches local SQLite.
 	const accountPool = await loadAuthBrokerAccountPool();
 	const settings = await resolveEffectiveSettings();
+	applyUnpausedProviders(settings);
 	const { accountPolicies, defaultReservePct } = await loadEffectiveAuthAccountPolicyConfig({ settings });
 	const client = createBrokerClient(brokerConfig);
 	const initialSnapshot = await fetchBrokerSnapshot(client);
@@ -1137,6 +1120,7 @@ export function createStrictCompletionProbe(): CompletionProbe {
 		const oauthIdentity =
 			input.credential.type === "oauth"
 				? {
+						accountId: input.credential.accountId,
 						orgId: input.credential.orgId,
 						region: input.credential.region,
 						inferenceRegion: input.credential.inferenceRegion,

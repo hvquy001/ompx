@@ -3,12 +3,11 @@ import * as path from "node:path";
 import { detectMacOSAppearance, MacAppearanceObserver } from "@oh-my-pi/pi-natives";
 import type { MarkdownTheme } from "../components/markdown";
 import type { Terminal, TerminalAppearance } from "../terminal";
-import { colorLuma } from "@oh-my-pi/pi-utils/color";
 import { getCustomThemesDir } from "@oh-my-pi/pi-utils/dirs";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import { isTerminalBackgroundQueryTrusted } from "../terminal-multiplexer";
 import { setActiveSymbolTheme } from "./active-symbols";
-import { ansi256ToHex, resolveThemeColors, resolveVarRefs } from "./color";
+import { ansi256ToHex, isLightSurface, resolveThemeColors, resolveVarRefs } from "./color";
 import { type CreateThemeOptions, getBuiltinThemes, loadTheme, loadThemeJson, loadThemeSync } from "./loader";
 import { type ThemeColor, type ThemeJson } from "./schema";
 import type { SymbolPreset } from "./symbols";
@@ -37,6 +36,7 @@ export {
 	getSettingsListTheme,
 	getSymbolTheme,
 	isHighlightLanguage,
+	setMarkdownColorful,
 	setMarkdownMermaidRendering,
 	warmHighlighter,
 } from "./tui-adapters";
@@ -761,17 +761,14 @@ export function stopThemeWatcher(): void {
  */
 function isLightThemeJson(themeJson: ThemeJson): boolean {
 	try {
-		const resolved = resolveVarRefs(themeJson.colors.statusLineBg, themeJson.vars ?? {});
-		const luminance = colorLuma(resolved);
-		return luminance !== undefined && luminance > 0.5;
+		return isLightSurface(resolveVarRefs(themeJson.colors.statusLineBg, themeJson.vars ?? {}));
 	} catch {
 		return false;
 	}
 }
 
 function getHtmlDefaultTextForSurface(surface: string | number | undefined): string {
-	const luminance = surface === undefined ? undefined : colorLuma(surface);
-	return luminance !== undefined && luminance > 0.5 ? "#000000" : "#e5e5e7";
+	return isLightSurface(surface) ? "#000000" : "#e5e5e7";
 }
 
 function resolveThemeExportColors(themeJson: ThemeJson): {

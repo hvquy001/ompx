@@ -260,7 +260,7 @@ export class TelegramBridge implements TelegramBridgeHandle {
 			generation.observedAgentStart = true;
 			return;
 		}
-		if (event.type !== "agent_end" || event.isTerminal === false || !generation.observedAgentStart) return;
+		if (event.type !== "agent_end" || !generation.observedAgentStart) return;
 		generation.observedAgentStart = false;
 		let text = "";
 		for (let index = event.messages.length - 1; index >= 0; index--) {

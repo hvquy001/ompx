@@ -24,6 +24,7 @@ import {
 	pathIsWithin,
 	stringifyJson,
 	toError,
+	withLoopPhase,
 } from "@oh-my-pi/pi-utils";
 import { isTaskToolDetails, type StructuredSubagentSchemaMode } from "@oh-my-pi/pi-tui/tools/task";
 import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
@@ -150,6 +151,8 @@ const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
 const SUPERSEDED_COMPACTION_SUMMARY = "[Superseded compaction summary elided after a newer compaction]";
 const SUPERSEDED_COMPACTION_SHORT_SUMMARY = "Superseded compaction elided";
 const DISCARDED_ENTRY_BRANCH_MARKER = "discarded-entry-branch";
+/** `model_usage` purpose carrying the billed usage of an assistant turn removed by `discardEntryDurably`. */
+const DISCARDED_TURN_USAGE_PURPOSE = "discarded-turn";
 /**
  * Read-back-and-retry passes one full rewrite makes after meeting another
  * writer's entries. Each pass re-reads the file, so only a writer that appends
@@ -1668,18 +1671,23 @@ export class SessionManager {
 		});
 	}
 
-	/** Serialize the whole file — title slot, header, entries — as lines, stamped with the state they came from. */
+	/**
+	 * Serialize the whole file — title slot, header, entries — as lines, stamped with the state they came from.
+	 * Runs as the `session.rewrite` loop phase: a long transcript takes hundreds of milliseconds to stringify.
+	 */
 	#serializeBody(): SessionFileBody {
 		const titleLine = this.#titleSlotLine();
 		const headerLine = this.#lineFor(this.#header);
 		const entries = this.#entries;
 		const lines = [titleLine, headerLine];
 		let bytes = Buffer.byteLength(titleLine, "utf8") + Buffer.byteLength(headerLine, "utf8");
-		for (const entry of entries) {
-			const line = this.#lineFor(entry);
-			bytes += Buffer.byteLength(line, "utf8");
-			lines.push(line);
-		}
+		withLoopPhase("session.rewrite", () => {
+			for (const entry of entries) {
+				const line = this.#lineFor(entry);
+				bytes += Buffer.byteLength(line, "utf8");
+				lines.push(line);
+			}
+		});
 		const stamp: SessionBodyStamp = {
 			entries,
 			entryCount: entries.length,
@@ -2346,7 +2354,6 @@ export class SessionManager {
 		this.#artifactManager = new ArtifactManager(
 			sessionFile.slice(0, -JSONL_SUFFIX_LENGTH),
 			pendingCopy?.sessionFile === sessionFile ? pendingCopy.done : undefined,
-			this.getSeanceSourceArtifactsDir() ?? undefined,
 		);
 		this.#artifactManagerSessionFile = sessionFile;
 		return this.#artifactManager;
@@ -3388,14 +3395,20 @@ export class SessionManager {
 		return !storage.defersSyncPublish && storage.existsSync(sessionFile);
 	}
 
+	/**
+	 * Whether another live omp process owns this session, so this process's
+	 * next write would move it to a sibling (`"open-elsewhere"`) instead of
+	 * appending. Claims the session when it is free, as a write would.
+	 * `AgentSession` checks it before writing its exit record: a process that
+	 * only loaded a session it does not own has nothing of its own to save.
+	 */
+	isOwnedElsewhere(): boolean {
+		return this.#sessionOwnedElsewhere();
+	}
+
 	getArtifactsDir(): string | null {
 		if (this.#adoptedArtifactManager) return this.#adoptedArtifactManager.dir;
 		return artifactsDirectoryFor(this.#sessionFile);
-	}
-
-	/** Source artifacts a seance fork reads in place; null for ordinary sessions. */
-	getSeanceSourceArtifactsDir(): string | null {
-		return artifactsDirectoryFor(this.#header?.seanceSource);
 	}
 
 	adoptArtifactManager(manager: ArtifactManagerApi): void {
@@ -4130,6 +4143,15 @@ export class SessionManager {
 	}
 
 	/**
+	 * All session entries (excludes header) without the defensive copy. The
+	 * array is live and owned by the manager: never mutate it, and use
+	 * `getEntries()` when you need a snapshot that survives appends.
+	 */
+	getEntriesView(): readonly SessionEntry[] {
+		return this.#entries;
+	}
+
+	/**
 	 * The active-leaf branch (same entries as `getBranch()`) without the
 	 * defensive copy. The array is the manager's memo: never mutate it. It is
 	 * live — an entry appended to the current leaf is pushed onto it — so use
@@ -4290,6 +4312,10 @@ export class SessionManager {
 	 * entry is removed. If any child may carry content, the subtree is preserved
 	 * off-branch instead. Both paths append a metadata-only branch marker and
 	 * rewrite the journal, making the selected path durable.
+	 *
+	 * A removed assistant turn was still billed, so its usage is re-journaled as
+	 * an off-branch `model_usage` entry; session totals and `omp stats` keep
+	 * counting it. A subtree preserved off-branch keeps its own usage.
 	 */
 	async discardEntryDurably(entryId: string): Promise<void> {
 		const entry = this.#index.get(entryId);
@@ -4304,6 +4330,26 @@ export class SessionManager {
 			}
 			this.#entries = this.#entries.filter(candidate => candidate.id !== entryId);
 			this.#index.rebuild(this.#entries);
+			if (entry.type === "message" && entry.message.role === "assistant") {
+				const { api, provider, model, usage, stopReason, errorMessage } = entry.message;
+				// Off-branch like late usage: totals count every entry, and the kept
+				// chain stays made of entries collab guests replicate.
+				this.#recordEntry({
+					type: "model_usage",
+					id: generateId(this.#index),
+					parentId: leafId,
+					timestamp: entry.timestamp,
+					runtime: currentRuntimeIdentity(),
+					activeLeafId: leafId,
+					purpose: DISCARDED_TURN_USAGE_PURPOSE,
+					api,
+					provider,
+					model,
+					usage,
+					stopReason,
+					...(errorMessage === undefined ? {} : { errorMessage }),
+				});
+			}
 		}
 		this.branchWithSummary(leafId, "", {
 			kind: DISCARDED_ENTRY_BRANCH_MARKER,
@@ -4476,12 +4522,6 @@ export class SessionManager {
 	 * auto-named `<timestamp>_<id>.jsonl` in `sessionDir`). Artifacts are copied
 	 * recursively by default; nested agents that deliberately share their parent's
 	 * artifact root may disable this with `copyArtifacts: false`.
-	 *
-	 * `seance` creates a read-only consult fork instead: artifacts stay in the
-	 * source (the header's `seanceSource` points lookups at them), inherited
-	 * workspace roots are dropped, and the source's `session_init` contracts
-	 * become inert `source_session_init` custom entries so revival never
-	 * mistakes them for the fork's own.
 	 */
 	static async forkFrom(
 		sourcePath: string,
@@ -4494,7 +4534,6 @@ export class SessionManager {
 			sessionFile?: string;
 			resetInheritedCost?: boolean;
 			repairInterruptedTail?: boolean;
-			seance?: boolean;
 		},
 	): Promise<SessionManager> {
 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
@@ -4527,15 +4566,9 @@ export class SessionManager {
 		);
 		manager.#header.title = sourceHeader?.title;
 		manager.#header.titleSource = sourceHeader?.titleSource;
-		manager.#additionalDirectories = options?.seance
-			? []
-			: (sourceHeader?.additionalDirectories ?? []).filter(d => d !== path.resolve(cwd));
+		manager.#additionalDirectories = (sourceHeader?.additionalDirectories ?? []).filter(d => d !== path.resolve(cwd));
 		manager.#header.additionalDirectories =
 			manager.#additionalDirectories.length > 0 ? manager.#additionalDirectories : undefined;
-		if (options?.seance) {
-			manager.#header.seanceSource = path.resolve(sourcePath);
-			SessionManager.#neutralizeSessionInits(history);
-		}
 		manager.#sessionName = manager.#header.title;
 		manager.#titleSource = manager.#header.titleSource;
 		manager.#titleUpdatedAt = nowIso();
@@ -4550,27 +4583,10 @@ export class SessionManager {
 		}
 		manager.#forceFileCreation = true;
 		await manager.#rewriteAtomically();
-		if (!options?.seance && options?.copyArtifacts !== false) {
+		if (options?.copyArtifacts !== false) {
 			await copySessionArtifacts(sourcePath, manager.#sessionFile!);
 		}
 		return manager;
-	}
-
-	/** Replace inherited `session_init` entries, in place, with inert custom entries keeping the same tree position. */
-	static #neutralizeSessionInits(history: SessionEntry[]): void {
-		for (let index = 0; index < history.length; index++) {
-			const entry = history[index]!;
-			if (entry.type !== "session_init") continue;
-			const neutralized: CustomEntry = {
-				type: "custom",
-				customType: "source_session_init",
-				id: entry.id,
-				parentId: entry.parentId,
-				timestamp: entry.timestamp,
-				data: entry,
-			};
-			history[index] = neutralized;
-		}
 	}
 
 	/**
@@ -4677,19 +4693,23 @@ export class SessionManager {
 	}
 
 	/**
-	 * Whether `session` was recorded in a worktree of `cwd`'s repository that no
-	 * longer exists, e.g. a `/wt` worktree removed since. Resume such a session
-	 * through {@link openRelocated} into `cwd`: its own directory cannot be entered.
+	 * Whether `session` is filed under `cwd` (its cwd-derived session directory,
+	 * or a worktree sibling's) while the directory it recorded no longer exists:
+	 * a `/wt` worktree removed since, or the project folder moved or renamed.
+	 * Such a session belongs to `cwd`; resume it through {@link openRelocated},
+	 * its own directory cannot be entered. A custom `--session-dir` is shared
+	 * across projects, so filing there proves nothing.
 	 * @param sessionDir `cwd`'s session directory; defaults to the cwd-derived one.
 	 */
-	static async isFromRemovedWorktree(
+	static async isStrandedIn(
 		session: Pick<SessionInfo, "path" | "cwd">,
 		cwd: string,
 		sessionDir?: string,
 	): Promise<boolean> {
 		if (!session.cwd || !(await directoryIsMissing(session.cwd))) return false;
-		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd);
+		const dir = path.resolve(sessionDir ?? SessionManager.getDefaultSessionDir(cwd));
 		const home = path.resolve(path.dirname(session.path));
+		if (home === dir) return resolveManagedSessionRoot(dir, cwd) !== undefined;
 		return (await worktreeSessionDirs(cwd, dir)).some(sibling => path.resolve(sibling) === home);
 	}
 
@@ -4733,7 +4753,6 @@ export class SessionManager {
 	): Promise<{
 		cwd: string;
 		init: PersistedSessionInit | null;
-		seanceSource?: string;
 	} | null> {
 		let header: SessionHeader | undefined;
 		const initEntries: FileEntry[] = [];
@@ -4755,7 +4774,6 @@ export class SessionManager {
 		return {
 			cwd: header.cwd ?? getProjectDir(),
 			init: extractSessionInit(initEntries),
-			seanceSource: header.seanceSource,
 		};
 	}
 	/**

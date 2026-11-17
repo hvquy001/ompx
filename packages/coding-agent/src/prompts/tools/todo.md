@@ -2,9 +2,8 @@
 
 Tasks are identified by verbatim content, never generated IDs such as `task-1`; keep unique, stable task and phase names. If exact text is lost, use `view`, never guess.
 Before work, initialize for 3+ steps, requested task sets, or new instructions. List every user item separately; never omit leftovers or track them from memory.
-After mutation: with no active task, earliest pending starts in phase order; with multiple active, only earliest remains active. Blocked tasks never start automatically; `unblock` returns one to pending. Out-of-order completion may rewind pointer but never reopens completed work.
-External waits block with optional reason (suppressing stop reminder) and start next pending; unblock when actionable. For agent-actionable blockers, append clearing task.
-After each successful state-changing op: if nothing is `in_progress`, the earliest `pending` task (phase order) auto-promotes to `in_progress`; if several are `in_progress`, only the earliest stays. Blocked tasks NEVER auto-promote—`unblock` first. Out-of-order completion may move pointer back to an earlier phase—expected; completed tasks NEVER revert.
+After mutation: with no active task, earliest pending starts in phase order; with multiple active, only earliest remains active. Out-of-order completion may rewind pointer but never reopens completed work.
+After each successful state-changing op: if nothing is `in_progress`, the earliest `pending` task (phase order) auto-promotes to `in_progress`; if several are `in_progress`, only the earliest stays. Out-of-order completion may move pointer back to an earlier phase—expected; completed tasks NEVER revert.
 
 ## Operations
 
@@ -15,10 +14,8 @@ After each successful state-changing op: if nothing is `in_progress`, the earlie
 |`start`|`task`|Mark in progress|
 |`done`|`task` or `phase`|Mark completed|
 |`drop`|`task` or `phase`|Mark abandoned|
-|`block`|`task` or `phase`; optional `reason`|Mark blocked: awaiting external input; never auto-promotes; excluded from stop-time incomplete-todo reminder|
-|`unblock`|`task` or `phase`|Blocked task → `pending`|
 |`rm`|optional `task` or `phase`|Remove task/phase; omit both → clear|
-|`append`|`phase`; `items: string[]`|Append tasks to phase; lazily creates phase|
+|`append`|`phase` (optional); `items: string[]`|Append tasks; omitted `phase` uses the in-progress task's phase, else first pending task's phase, else last phase, else a new `Tasks` phase; lazily creates named phase|
 |`view`|—|Read-only; echo list|
 
 ## Anatomy
@@ -30,7 +27,6 @@ After each successful state-changing op: if nothing is `in_progress`, the earlie
 
 - Mark tasks done immediately after finishing; complete phases in order. Completing a phase is a context-compaction boundary: if context usage is ≥ 40% and the finished phase's raw output is not needed next, restate what the next phase needs and schedule `compact` as the last call of the turn.
 - NEVER make a todo call the turn's only tool call: emit it in the same response as the next real tool call (parallel tool calls). Batch with real work: `init` with first reads/edits; each `done`/`start` with next action. Solo todo turns waste a round trip.
-- Waiting on something you can't act on—a user decision, another agent, external service: `block` task (optional `reason`); remains tracked but avoids stop reminder. Blocking the active task hands `in_progress` to the next `pending` task, never back to the blocked one. `unblock` when actionable. If blocker agent-actionable, `append` an unblocking task instead.
 - Keep introduced `task`/`phase` strings stable.
 - Lost exact task text: `view` echoes list; NEVER guess from memory.
 

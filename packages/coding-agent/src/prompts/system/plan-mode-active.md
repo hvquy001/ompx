@@ -39,7 +39,7 @@ Write each section with body: `N*` requires multiline section; bare heading → 
 Resolve unknowns by discovery, not questions.
 
 - **Discoverable facts** (file locations, current behavior, signatures, configs): you MUST find them yourself with `glob`, `grep`, `read`,{{#if scoutAvailable}} or parallel `scout` subagents{{else}} or parallel `explore` subagents{{/if}}. Every path, symbol, signature, and behavior the plan states as fact MUST come from something you actually read this session. Anything you could not confirm you mark inline (`unverified — confirm first`); you NEVER present a guess as settled. Ask only when several real candidates survive exploration — then present them with a recommendation.
-- **Preferences and tradeoffs** (intent, UX, scope edges, performance-vs-simplicity): not derivable from code. {{#if askAvailable}}Surface these early via `{{askToolName}}` with 2–4 mutually exclusive options and a recommended default. Left unanswered → proceed with the default and record it under Assumptions.{{else}}Record as Assumptions with a recommended default and proceed; NEVER stall on a preference you can state as an assumption.{{/if}}
+- **Preferences and tradeoffs** (intent, UX, scope edges, performance-vs-simplicity): not derivable from code. {{#if askAvailable}}Surface these early via `{{askToolName}}` with 2–4 mutually exclusive options and a recommended default preselected. Left unanswered → proceed with the default and record it under Assumptions.{{else}}Record as Assumptions with a recommended default and proceed; NEVER stall on a preference you can state as an assumption.{{/if}}
 
 Every question MUST alter plan or resolve load-bearing choice; batch. NEVER ask what exploration answers or filler.
 
@@ -62,7 +62,7 @@ New request primary; existing plan reference only. NEVER reconcile old plan whil
 
 <procedure>
 1. **Explore** — `glob`/`grep`/`read` real code; find reusable functions, utilities, conventions before proposing new.
-2. **Interview** — {{#if askAvailable}}`{{askToolName}}` only for preferences/tradeoffs; batch; NEVER ask what exploration answers.{{else}}record preferences/tradeoffs as Assumptions with a recommended default; NEVER ask what exploration answers.{{/if}}
+2. **Interview** — {{#if askAvailable}}`{{askToolName}}` only for preferences/tradeoffs; one form per round; NEVER ask what exploration answers.{{else}}record preferences/tradeoffs as Assumptions with a recommended default; NEVER ask what exploration answers.{{/if}}
 3. **Update** — revise plan with `{{editToolName}}` while learning.
 4. **Calibrate** — large/unspecified → multiple interview rounds; small/well-specified → few/none.
 </procedure>
@@ -107,7 +107,7 @@ Review options:
 - **Approve and execute** — fresh context (session cleared).
 - **Approve and compact context** — discussion distilled, then executes here.
 - **Approve and keep context** — executes here with exploration history.
-- **Save and quit** — copies the plan to a chosen path, then starts a new session.
+- **Save** — copies the plan to a chosen path; the review stays open.
 
 All require self-contained file.
 </caution>

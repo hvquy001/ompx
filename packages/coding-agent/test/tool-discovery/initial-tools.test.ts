@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { KanbanTool } from "@oh-my-pi/pi-coding-agent/kanban/tool";
-import { IdaTool } from "@oh-my-pi/pi-coding-agent/tools/ida";
 import { FindTool } from "@oh-my-pi/pi-coding-agent/tools/jfind";
 import type { BuiltinToolLoadMode, ToolLoopManager, ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import {
@@ -81,8 +80,6 @@ async function getToolMetadata(): Promise<Map<string, { loadMode?: string; summa
 		new SecretsTool(toolSession),
 		// `find` is gated on a native judge (find.enabled=auto), so construct it directly.
 		new FindTool(toolSession),
-		// `ida` requires an installed IDA Pro runtime; its metadata remains discoverable.
-		new IdaTool(toolSession),
 		new ContextNotesTool(toolSession),
 		new NewContextTool(toolSession),
 		// `browser_jev` only builds with a TypeSafe key in the environment, so

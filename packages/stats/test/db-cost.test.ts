@@ -394,13 +394,14 @@ describe("stats subscription cost correction", () => {
 		]);
 
 		// Prompt input (1000 + 200 + 300000) crosses the inclusive 200K tier, so
-		// the whole request bills at 4/12/0.4; orchestration input/output are
+		// the whole request bills at the 2x long-context card 2.5/5/0.4 derived from
+		// the 1.25/2.5 grok-4.20 card (af77a95a26); orchestration input/output are
 		// priced alongside the conversation buckets.
 		const request = getRecentRequests(1)[0];
-		expect(request?.usage.cost.input).toBeCloseTo((4 / 1e6) * 301_000, 8);
-		expect(request?.usage.cost.output).toBeCloseTo((12 / 1e6) * 1_500, 8);
+		expect(request?.usage.cost.input).toBeCloseTo((2.5 / 1e6) * 301_000, 8);
+		expect(request?.usage.cost.output).toBeCloseTo((5 / 1e6) * 1_500, 8);
 		expect(request?.usage.cost.cacheRead).toBeCloseTo((0.4 / 1e6) * 200, 8);
-		expect(request?.usage.cost.total).toBeCloseTo(1.22208, 8);
+		expect(request?.usage.cost.total).toBeCloseTo(0.76008, 8);
 	});
 });
 

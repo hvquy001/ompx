@@ -12,6 +12,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { fixedAdvisorTools } from "./helpers/agent-session-setup";
 
 const ADVISOR_NOTE = "Both tools must settle before this concern is considered.";
 const SKIPPED_TOOL_RESULT = "Skipped due to queued user message";
@@ -140,7 +141,7 @@ describe("AgentSession advisor delivery during a tool batch", () => {
 			sessionManager: SessionManager.inMemory(),
 			settings,
 			modelRegistry,
-			advisorTools: [],
+			advisorTools: fixedAdvisorTools(),
 			advisorStreamFn: advisorMock.stream,
 			convertToLlm,
 		});
@@ -280,7 +281,7 @@ describe("AgentSession advisor delivery during a tool batch", () => {
 			sessionManager,
 			settings,
 			modelRegistry,
-			advisorTools: [],
+			advisorTools: fixedAdvisorTools(),
 			convertToLlm,
 		});
 		settings.setModelRole("advisor", `${model.provider}/${model.id}`);

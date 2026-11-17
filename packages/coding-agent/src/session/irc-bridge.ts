@@ -85,6 +85,15 @@ export class IrcBridge {
 		return this.#asides.length > 0;
 	}
 
+	/**
+	 * Whether a queued record wakes a turn once the session idles. Parked deferred wakes do
+	 * not: they wait for a turn of their own after the driven run or pooled contract that
+	 * parked them.
+	 */
+	hasWakeable(): boolean {
+		return this.#interrupts.length > 0 || this.#asides.length > 0;
+	}
+
 	/** Whether any undelivered IRC record remains queued. */
 	hasPending(): boolean {
 		return this.#interrupts.length > 0 || this.#asides.length > 0 || this.#deferredWakes.length > 0;
@@ -329,7 +338,9 @@ export class IrcBridge {
 				triage,
 				triageStatus: triage === "status",
 			}),
-			display: true,
+			// The parent steer becomes the transcript card when consumed; keep this
+			// observation available to listeners without also painting a live card.
+			display: !(streaming && fromParent && !peerMessage),
 			details: {
 				id: msg.id,
 				from: msg.from,
@@ -355,6 +366,7 @@ export class IrcBridge {
 						triage,
 						triageStatus: triage === "status",
 					}),
+					parentIrc: { from: msg.from, body: msg.body },
 					attribution: "agent",
 					timestamp: msg.ts,
 					steering: true,

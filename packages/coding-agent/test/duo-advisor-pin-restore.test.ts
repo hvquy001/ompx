@@ -11,6 +11,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TempDir } from "@oh-my-pi/pi-utils";
 import type { DuoStateSnapshot } from "../src/duo";
 import { cfgDuoAdvisorModel, cfgDuoMode } from "../src/duo/settings";
+import { fixedAdvisorTools } from "./helpers/agent-session-setup";
 
 interface DuoSnapshotDetails extends DuoStateSnapshot {
 	advisorModelId?: string;
@@ -114,7 +115,7 @@ describe("AgentSession duo advisor pin restore", () => {
 			sessionManager: options?.sessionManager ?? SessionManager.inMemory(tempDir?.path()),
 			settings: options?.settings ?? settings(),
 			modelRegistry,
-			advisorTools: [],
+			advisorTools: fixedAdvisorTools(),
 		});
 		sessions.push(session);
 		return session;

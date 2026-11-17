@@ -3,7 +3,7 @@ import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
 import type { Component, Container, EditorTheme, KeyId, Loader, TUI } from "@oh-my-pi/pi-tui";
 import type { TspText } from "@oh-my-pi/pi-wire";
-import type { StatusNotice } from "@oh-my-pi/pi-tui/chrome/status-notice";
+import type { StatusNotice, StatusNoticeAction } from "@oh-my-pi/pi-tui/chrome/status-notice";
 import type { CollabController } from "../collab/controller";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
@@ -33,6 +33,8 @@ import type { KanbanForkedAgent, KanbanForkRequest } from "../kanban/runtime";
 import type { MCPManager } from "../mcp";
 import type { PlanApprovalDetails } from "../plan-mode/approved-plan";
 import type { AgentSession } from "../session/agent-session";
+import type { BlockedKind } from "../utils/run-status";
+import type { DroppedPrompt } from "../session/agent-session-types";
 import type { AgentViewSession } from "../session/agent-session-handle";
 import type { CompactMode } from "../session/compact-modes";
 import type { ForeignSessionSource } from "../session/foreign-session-store";
@@ -41,7 +43,7 @@ import type { SessionContext } from "../session/session-context";
 import type { SessionManager } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
 import type { DictationTarget } from "../stt";
-import type { SessionContinuation, SessionInfo } from "../session/session-listing";
+import type { SessionContinuation } from "../session/session-listing";
 import type { SpaceHoldHandler } from "@oh-my-pi/pi-tui/space-hold";
 import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { LspStartupServerInfo } from "../tools";
@@ -101,23 +103,31 @@ export type SubmittedUserInput = {
 	 *  it). Normal user Enter carries "steer" to match the streaming-branch Enter;
 	 *  background/continuation submits omit it and default to "followUp". */
 	streamingBehavior?: "steer" | "followUp";
+	/** Prompts sent after this one, in order, as the session prompt's `followUps`. */
+	followUps?: string[];
 	/** Set by `submitInteractiveInput` for a custom-message submission: the session took it (started a turn or queued it into one). */
 	dispatched?: boolean;
 	cancelled: boolean;
 	started: boolean;
 };
 
+/** A dialog that hands typing to the composer: registered by the ExtensionUiController approval, form and ask presenters, read by InputController's image and HTML paste routing. */
+export interface ComposerOwner {
+	component: Component;
+	owns(): boolean;
+}
+
 export interface InteractiveModeInitOptions {
 	suppressWelcomeIntro?: boolean;
 	clearInitialTerminalHistory?: boolean;
 	/** Opt into hosting when the caller owns outer startup readiness and shutdown. */
 	autoStartCollab?: boolean;
+	/** A command-line prompt runs once startup ends: report `working` from the first frame. */
+	startupRun?: boolean;
 }
 
 export type InteractiveSelectorDialogOptions = ExtensionUIDialogOptions &
 	Pick<HookSelectorOptions, "disabledIndices" | "inline">;
-
-export type SessionPickHandler = (session: SessionInfo) => void | Promise<void>;
 
 /** How {@link InteractiveModeContext.handleResumeSession} picks the file it opens. */
 export interface ResumeSessionOptions {
@@ -141,19 +151,24 @@ export interface RenderSessionContextOptions {
 	preservedLiveToolCallIds?: ReadonlySet<string>;
 }
 
+export interface RenderInitialMessagesOptions {
+	preserveExistingChat?: boolean;
+	clearTerminalHistory?: boolean;
+	/**
+	 * Called synchronously, once, with the session context the committed transcript was built from.
+	 * Not called when a newer replay supersedes this one.
+	 */
+	onCommit?: (context: SessionContext) => void;
+}
+
 /** How {@link InteractiveModeContext.showStatus} shows a notice. */
 export interface ShowStatusOptions {
 	/** Dims the ANSI line (default true). */
 	dim?: boolean;
 	/** Toasts it on a native terminal (default true); false keeps it to the ANSI transcript. */
 	toast?: boolean;
-}
-
-export interface SelectOnlyModelSelectorOptions {
-	/** Use the selected `provider/id` for the caller's operation without mutating session defaults. */
-	onSelect: (selector: string) => void | Promise<void>;
-	/** `provider/id` initially highlighted in the picker. */
-	currentSelector?: string;
+	/** A button on the native toast (Undo); the ANSI line has none. */
+	action?: StatusNoticeAction;
 }
 
 export interface AgentHubOpenOptions {
@@ -185,6 +200,7 @@ export interface InteractiveModeContext {
 	reportContainer: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
+	editorTopGapContainer: Container;
 	hookWidgetContainerAbove: Container;
 	hookWidgetContainerBelow: Container;
 	statusLine: StatusLineComponent;
@@ -200,8 +216,6 @@ export interface InteractiveModeContext {
 	// Session access
 	session: AgentSession;
 	sessionManager: SessionManager;
-	/** Re-resolve the CLI/settings model scope after a successful OAuth login. */
-	refreshScopedModelsAfterLogin?: () => Promise<void>;
 	/** The current session display name / title. */
 	readonly sessionName: string | undefined;
 	/** Session the transcript/editor/status are attached to: the focused agent's, else `session`. */
@@ -212,6 +226,8 @@ export interface InteractiveModeContext {
 	readonly focusedAgentId: string | undefined;
 	/** Set while a tool-approval dialog owns the composer: its drafts steer the main session awaiting that approval, even from a focused agent's view. */
 	approvalOwnsComposer?: boolean;
+	/** The mounted dialog that currently hands typing to the composer, if any. */
+	composerOwner?: ComposerOwner;
 	/** Focus the main view on an agent's live session (delegates to SessionFocusController.focusAgent). */
 	focusAgentSession(id: string): Promise<void>;
 	/** Focus the focused agent's parent session, falling back to main (delegates to focusParent). */
@@ -410,7 +426,8 @@ export interface InteractiveModeContext {
 	// Lifecycle
 	init(options?: InteractiveModeInitOptions): Promise<void>;
 	playWelcomeIntro(): void;
-	shutdown(): Promise<void>;
+	/** Close and quit. Operator quits are cancellable by extensions; pass `cancellable: false` for forced closes. */
+	shutdown(options?: { cancellable?: boolean }): Promise<void>;
 	/** Tear down like {@link shutdown}, then relaunch the CLI with the original launch flags, resuming this session. */
 	restart(): Promise<void>;
 	/** Request graceful shutdown at the next fully settled boundary, including background turns. */
@@ -498,10 +515,13 @@ export interface InteractiveModeContext {
 			customType?: string;
 			display?: boolean;
 			streamingBehavior?: "steer" | "followUp";
+			followUps?: string[];
 		},
 		options?: { preserveDraft?: boolean; clearEditor?: boolean },
 	): SubmittedUserInput;
 	cancelPendingSubmission(): boolean;
+	/** Put a prompt that never reached the agent (and its unsent follow-ups, as one `=>` list) back in an empty editor. */
+	restoreDroppedPrompt(prompt: DroppedPrompt): void;
 	markPendingSubmissionStarted(input: SubmittedUserInput): boolean;
 	finishPendingSubmission(input: SubmittedUserInput): void;
 	/**
@@ -550,7 +570,7 @@ export interface InteractiveModeContext {
 		options: RenderSessionContextOptions,
 		renderChunk?: () => void,
 	): Promise<void>;
-	renderInitialMessages(options?: { preserveExistingChat?: boolean; clearTerminalHistory?: boolean }): Promise<void>;
+	renderInitialMessages(options?: RenderInitialMessagesOptions): Promise<void>;
 	/**
 	 * In-place transcript rewind: drop the rendered components at/after
 	 * `message` when none of their rows reached native scrollback. Returns
@@ -607,6 +627,7 @@ export interface InteractiveModeContext {
 		customInstructions?: string,
 		mode?: CompactMode,
 		beforeFlush?: (outcome: CompactionOutcome) => void | Promise<void>,
+		options?: Pick<CompactOptions, "internalGuidance" | "readerModel">,
 	): Promise<CompactionOutcome>;
 	handleHandoffCommand(customInstructions?: string): Promise<void>;
 	handleShakeCommand(mode: ShakeMode): Promise<void>;
@@ -634,7 +655,6 @@ export interface InteractiveModeContext {
 	): Promise<CompactionOutcome>;
 	openInBrowser(urlOrPath: string): void;
 	refreshSlashCommandState(cwd?: string): Promise<void>;
-	refreshPluginState(cwd?: string): Promise<void>;
 	/** Reload session skills and derived `/skill:<name>` commands. */
 	refreshSkillState(): Promise<void>;
 	applyCwdChange(newCwd: string): Promise<boolean>;
@@ -650,16 +670,16 @@ export interface InteractiveModeContext {
 	showWorkflowsDashboard(): void;
 	/** Open the fullscreen git UI, optionally pinned to a revision (`/git <rev>`). */
 	showGitUi(revision?: string): void;
-	showModelSelector(options?: { temporaryOnly?: boolean; selectOnly?: SelectOnlyModelSelectorOptions }): void;
+	showModelSelector(options?: { temporaryOnly?: boolean }): void;
 	/** Session-only switch to an already-resolved model (`/switch <selector>`); compacts first when over context. */
 	switchSessionModel(model: Model, thinkingLevel?: ConfiguredThinkingLevel): Promise<void>;
-	showPluginSelector(mode?: "install" | "uninstall"): void;
-	showUserMessageSelector(): void;
+	showPluginSelector(mode?: "install" | "uninstall"): Promise<void>;
+	showUserMessageSelector(startAt?: string): void;
 	showCopySelector(): void;
 	showTreeSelector(): void;
 	/** Open the `/effort` picker over the levels the current model accepts. */
 	showThinkingSelector(): void;
-	showSessionSelector(source?: ForeignSessionSource, onSelect?: SessionPickHandler): void;
+	showSessionSelector(source?: ForeignSessionSource): void;
 	/** Settle side requests before replacing the session or deleting its artifacts. */
 	prepareSessionSwitch(): Promise<void>;
 	handleResumeSession(sessionPath: string, options?: ResumeSessionOptions): Promise<void>;
@@ -698,6 +718,10 @@ export interface InteractiveModeContext {
 	handleKanbanBoardAgent(request: KanbanForkRequest): Promise<KanbanForkedAgent | null>;
 	hasActiveBtw(): boolean;
 	handleBtwEscape(): boolean;
+	/** The composer talks to a `/btw` note (Tern): plain drafts go to its topic as follow-ups. */
+	readonly isBtwFocused: boolean;
+	/** Sends a draft to the focused `/btw` note's topic; false when no follow-up started. */
+	submitBtwFollowUp(question: string, images?: ImageContent[]): Promise<boolean>;
 	handleBtwBranchKey(): Promise<boolean>;
 	canBranchBtw(): boolean;
 	handlesBtwBranchKey(): boolean;
@@ -787,6 +811,7 @@ export interface InteractiveModeContext {
 		title: string,
 		options: ExtensionUISelectItem[],
 		dialogOptions?: InteractiveSelectorDialogOptions,
+		extra?: { kind?: BlockedKind },
 	): Promise<string | undefined>;
 	hideHookSelector(): void;
 	showHookInput(title: string, placeholder?: string): Promise<string | undefined>;

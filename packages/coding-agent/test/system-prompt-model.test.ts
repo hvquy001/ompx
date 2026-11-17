@@ -221,10 +221,10 @@ describe("AgentSession model-change prompt refresh", () => {
 
 	function pickModelsAcrossTaskPolicies(): [Model, Model] {
 		const all = modelRegistry.getAll();
-		const defaultPolicy = all.find(model => !usesCodexTaskPrompt(model.id));
-		const codexPolicy = all.find(model => usesCodexTaskPrompt(model.id));
-		if (!defaultPolicy || !codexPolicy) throw new Error("Expected default-policy and GPT-5.6 models");
-		return [defaultPolicy, codexPolicy];
+		const gated = all.find(model => resolveDelegationBias(model) === "gated");
+		const restrained = all.find(model => resolveDelegationBias(model) === "restrained");
+		if (!gated || !restrained) throw new Error("Expected gated and restrained delegation models");
+		return [gated, restrained];
 	}
 
 	function newSession(

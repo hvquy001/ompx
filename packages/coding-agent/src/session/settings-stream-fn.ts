@@ -14,6 +14,7 @@ import { fitOutputTokensToContextWindow, type StreamFn, Tokenizer } from "@oh-my
 import { type Model, type SimpleStreamOptions, type ThinkingDisplay, streamSimple } from "@oh-my-pi/pi-ai";
 import { openAIResponsesReplaysNativeHistory } from "@oh-my-pi/pi-ai/providers/openai-responses-state";
 import { serverSideFallbackModels } from "@oh-my-pi/pi-catalog/compat/server-side-fallback";
+import { cfgOffline } from "../config/auxiliary-model-policy";
 import type { Settings } from "../config/settings";
 import { cfgThinkingDisplay } from "../modes/settings";
 import { type AnthropicSlowModeLanes, anthropicSlowModeLanes } from "./anthropic-slow-mode";
@@ -115,13 +116,9 @@ export function createSettingsAwareStreamFn(
 			openrouterRoutingPreset && openrouterRoutingPreset !== "default" ? openrouterRoutingPreset : undefined;
 		const antigravityEndpointMode = cfgProvidersAntigravityEndpoint.get(settings);
 		const textVerbosity =
-			model.api === "openai-codex-responses"
-				? cfgTextVerbosity.isConfigured(settings)
-					? cfgTextVerbosity.get(settings)
-					: undefined
-				: model.api === "openai-responses"
-					? cfgTextVerbosity.get(settings)
-					: undefined;
+			model.api === "openai-codex-responses" || model.api === "openai-responses"
+				? cfgTextVerbosity.get(settings)
+				: undefined;
 		const resolvedThinkingDisplay = resolveThinkingDisplay(settings);
 		// A caller that set either thinking field owns the display decision as a unit: pi-ai lets
 		// `thinkingDisplay` win over `hideThinkingSummary`, so injecting a settings display here would
@@ -219,7 +216,7 @@ export function createSettingsAwareStreamFn(
 			...(storeResponses !== undefined ? { storeResponses } : {}),
 			// A per-call worker never switches models: no fallback chain, including a
 			// caller-supplied one, and Factory drops its own refusal chain.
-			...(slowModeContext?.disableServerSideFallback
+			...(slowModeContext?.disableServerSideFallback || cfgOffline.get(settings)
 				? { fallbacks: undefined, disableServerSideFallback: true }
 				: {}),
 			...(codexAccessPrograms !== undefined ? { codexAccessPrograms } : {}),

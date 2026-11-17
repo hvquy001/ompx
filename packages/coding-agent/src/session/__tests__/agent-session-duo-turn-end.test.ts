@@ -15,6 +15,7 @@ import { SessionManager } from "../session-manager";
 import { cfgDuoAdvisorEscalationModel, cfgDuoAdvisorModel } from "../../duo/settings";
 import { cfgModelRoles } from "../../config/model-settings";
 import { cfgAdvisorEnabled } from "../../advisor/settings";
+import { fixedAdvisorTools } from "../../../test/helpers/agent-session-setup";
 
 type TurnEndCallback = (
 	messages: AgentMessage[],
@@ -199,7 +200,7 @@ async function createTurnEndHarness(options: TurnEndHarnessOptions = {}): Promis
 		modelRegistry,
 		persistInitialMCPToolSelection: false,
 		agentKind: "main",
-		advisorTools: [],
+		advisorTools: fixedAdvisorTools(),
 	});
 	sessions.push(session);
 	await session.setDuoEnabled(true);
@@ -281,7 +282,7 @@ describe("AgentSession duo turn-end maintenance", () => {
 			persistInitialMCPToolSelection: false,
 			agentKind: "main",
 			advisorStreamFn: streamFn,
-			advisorTools: [],
+			advisorTools: fixedAdvisorTools(),
 		});
 		sessions.push(session);
 		expect(session.setAdvisorEnabled(true)).toBe(true);

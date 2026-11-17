@@ -50,6 +50,7 @@ export interface SessionMemoryHost {
 	setHindsightSessionState(state: HindsightSessionState | undefined): void;
 	getMnemopiSessionState(): MnemopiSessionState | undefined;
 	takeMnemopiSessionState(): MnemopiSessionState | undefined;
+
 	refreshBaseSystemPrompt(): Promise<void>;
 	replaceMemoryTools(tools: AgentTool[]): Promise<void>;
 }

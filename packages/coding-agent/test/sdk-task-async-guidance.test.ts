@@ -17,7 +17,7 @@ import type { SingleResult } from "@oh-my-pi/pi-tui/tools/task";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
-const deliveryGuidance = "Results auto-deliver; `read proc://` snapshots do not consume delivery. NEVER busy-poll.";
+const deliveryGuidance = "Results auto-deliver; NEVER busy-poll.";
 const sessions: AgentSession[] = [];
 const roots: TempDir[] = [];
 const stores: ModelRegistry[] = [];
@@ -159,28 +159,25 @@ describe("SDK async task guidance", () => {
 			extensions: [taskWrapper],
 		});
 		await session.prompt("Delegate two independent inspections");
-		expect(taskResults(requests[1].messages).map(text)).toEqual([
-			"Spawned agent `first` (job `first`).",
-			"Spawned agent `second` (job `second`).",
-		]);
+		const [first, second] = taskResults(requests[1].messages).map(text);
+		expect(first).toStartWith("Spawned agent `first` (job `first`).");
+		expect(first).toContain("proc://<id>/kill");
+		expect(second).toBe("Spawned agent `second` (job `second`).");
 		const description = requests[1].taskDescription;
 		expect(description).toContain("Inspect the named target");
 		expect(description).toContain(deliveryGuidance);
-		expect(description).toContain("without consuming delivery");
-		expect(description).toContain("proc://<id>/kill");
+		expect(description).not.toContain("proc://");
 		expect(description).not.toContain("`solutionSpace`");
 	});
 
 	it.each(["off", "on"])(
-		"sends guidance once through descriptors without repeating it in results (inline=%s)",
+		"sends the delivery rule once through descriptors and the job lifecycle with the first spawn result (inline=%s)",
 		async inline => {
 			const { session, requests, mock } = await harness({}, inline);
 			await session.prompt("Delegate two independent inspections");
 			const sent = taskResults(requests[1].messages);
-			expect(sent.map(text)).toEqual([
-				"Spawned agent `first` (job `first`).",
-				"Spawned agent `second` (job `second`).",
-			]);
+			expect(sent.map(text).filter(result => result.includes("without consuming delivery"))).toHaveLength(1);
+			expect(sent.map(text)[1]).toBe("Spawned agent `second` (job `second`).");
 			for (const request of requests) {
 				const instructions = inline === "on" ? request.systemPrompt?.join("\n") : request.taskDescription;
 				// The fork's system prompt renders the tool inventory twice (middle + tail); the descriptor itself carries it once.

@@ -22,8 +22,8 @@ export const BLOB_BROKER_WORKER_ARG = "__omp_worker_blob_broker";
 export const COMPUTER_WORKER_ARG = "__omp_worker_computer";
 /** Daemon-broker selector shared by the CLI dispatcher and worker launcher. */
 export const DAEMON_BROKER_WORKER_ARG = "__omp_worker_daemon_broker";
-/** IDA-host selector shared by the CLI dispatcher and the broker daemon spec. */
-export const IDA_HOST_WORKER_ARG = "__omp_worker_ida_host";
+/** Disassembler-host selector shared by the CLI dispatcher and the broker daemon spec. */
+export const DISASM_HOST_WORKER_ARG = "__omp_worker_disasm_host";
 /** Mnemopi shared embedding-server selector shared by the CLI dispatcher and `embed-client.ts`. */
 export const MNEMOPI_EMBED_SERVER_WORKER_ARG = "__omp_worker_mnemopi_embed_server";
 /** LSP-multiplexer selector shared by the CLI dispatcher and worker launcher. */
@@ -46,6 +46,8 @@ export const TINY_WORKER_ARGS: Record<string, true> = {
 	__tiny_worker: true,
 };
 export const STATS_SYNC_WORKER_ARG = "__omp_worker_stats_sync";
+/** Spotlight aggregation worker selector shared by the CLI dispatcher and `@oh-my-pi/omp-stats`. */
+export const STATS_SPOTLIGHT_WORKER_ARG = "__omp_worker_stats_spotlight";
 export const TAB_WORKER_ARG = "__omp_worker_tab";
 export const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 
@@ -53,6 +55,7 @@ export const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 export const INTERNAL_WORKER_ENTRY_ARGS: Record<string, true> = {
 	...TINY_WORKER_ARGS,
 	[STATS_SYNC_WORKER_ARG]: true,
+	[STATS_SPOTLIGHT_WORKER_ARG]: true,
 	[TAB_WORKER_ARG]: true,
 	[JS_EVAL_WORKER_ARG]: true,
 };

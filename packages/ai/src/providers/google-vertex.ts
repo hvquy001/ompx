@@ -22,7 +22,10 @@ export interface GoogleVertexOptions extends GoogleSharedStreamOptions {
 	location?: string;
 }
 
-const API_VERSION = "v1";
+// `v1beta1`, the Google Gen AI SDK's default: Agent Platform serves long decodes
+// (`continuationToken`, Gemini 4 Hydrogen past 65,536 output tokens) only there.
+// https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-hydrogen#known-issues
+const API_VERSION = "v1beta1";
 const INTERACTIONS_API_VERSION = "v1beta1";
 const INTERACTIONS_API_REVISION = "2026-05-20";
 

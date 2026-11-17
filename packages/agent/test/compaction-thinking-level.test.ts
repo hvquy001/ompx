@@ -194,6 +194,18 @@ function makePreparation(overrides: Partial<CompactionPreparation> = {}): Compac
 	};
 }
 
+// The history and turn-prefix summarizers carry the resolved session effort;
+// the 512-token display summary always runs with reasoning disabled.
+function expectSummarizerEfforts(calls: unknown[][], effort: ai.Effort): void {
+	expect(calls).toHaveLength(3);
+	const options = calls.map(call => call[2] as { reasoning?: ai.Effort; disableReasoning?: boolean } | undefined);
+	const display = options.filter(opts => opts?.disableReasoning === true);
+	expect(display).toHaveLength(1);
+	expect(display[0]?.reasoning).toBeUndefined();
+	const full = options.filter(opts => opts?.disableReasoning !== true);
+	expect(full.map(opts => opts?.reasoning)).toEqual([effort, effort]);
+}
+
 describe("compact() propagates thinkingLevel to all three summarizers (regression)", () => {
 	test("ThinkingLevel.Off → every fan-out call gets reasoning=undefined", async () => {
 		const spy = vi
@@ -211,7 +223,7 @@ describe("compact() propagates thinkingLevel to all three summarizers (regressio
 		}
 	});
 
-	test("ThinkingLevel.Low → every fan-out call gets reasoning=low", async () => {
+	test("ThinkingLevel.Low → history and turn-prefix calls get reasoning=low", async () => {
 		const spy = vi
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "summary" }]));
@@ -220,13 +232,10 @@ describe("compact() propagates thinkingLevel to all three summarizers (regressio
 			thinkingLevel: ThinkingLevel.Low,
 		});
 
-		expect(spy).toHaveBeenCalledTimes(3);
-		for (const [, , opts] of spy.mock.calls) {
-			expect(opts?.reasoning).toBe(ai.Effort.Low);
-		}
+		expectSummarizerEfforts(spy.mock.calls, ai.Effort.Low);
 	});
 
-	test("ThinkingLevel.Max on max-capable Anthropic → every fan-out call gets reasoning=max", async () => {
+	test("ThinkingLevel.Max on max-capable Anthropic → history and turn-prefix calls get reasoning=max", async () => {
 		const spy = vi
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "summary" }]));
@@ -235,23 +244,17 @@ describe("compact() propagates thinkingLevel to all three summarizers (regressio
 			thinkingLevel: ThinkingLevel.Max,
 		});
 
-		expect(spy).toHaveBeenCalledTimes(3);
-		for (const [, , opts] of spy.mock.calls) {
-			expect(opts?.reasoning).toBe(ai.Effort.Max);
-		}
+		expectSummarizerEfforts(spy.mock.calls, ai.Effort.Max);
 	});
 
-	test("undefined thinkingLevel → every fan-out call still gets reasoning=high (historical default)", async () => {
+	test("undefined thinkingLevel → history and turn-prefix calls still get reasoning=high (historical default)", async () => {
 		const spy = vi
 			.spyOn(ai, "completeSimple")
 			.mockResolvedValue(createAssistantMessage([{ type: "text", text: "summary" }]));
 
 		await compact(makePreparation(), getAnthropicModel(), "test-key", undefined, undefined);
 
-		expect(spy).toHaveBeenCalledTimes(3);
-		for (const [, , opts] of spy.mock.calls) {
-			expect(opts?.reasoning).toBe(ai.Effort.High);
-		}
+		expectSummarizerEfforts(spy.mock.calls, ai.Effort.High);
 	});
 
 	test("xai-oauth/grok-build + ThinkingLevel.High → every fan-out call gets reasoning=undefined (clamp)", async () => {
