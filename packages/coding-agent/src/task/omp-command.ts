@@ -1682,7 +1682,7 @@ export function shouldSelfSandboxArgv(argv: readonly string[], env: Record<strin
 	);
 }
 
-function currentOmpxBaseCommand(argv: string[], options: OmpxSelfSandboxOptions): OmpxCommand {
+export function currentOmpxBaseCommand(argv: string[], options: OmpxSelfSandboxOptions): OmpxCommand {
 	const execPath = options.execPath ?? process.execPath;
 	const entryPath = options.entryPath ?? process.argv[1];
 	const args =

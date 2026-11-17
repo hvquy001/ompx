@@ -693,6 +693,19 @@ export class RpcClient {
 		};
 	}
 
+	/** Subscribe to `extension_ui_request` frames (dialogs, notifications). Answer dialogs with `respondExtensionUi`. */
+	onExtensionUiRequest(listener: (request: RpcExtensionUIRequest) => void): () => void {
+		this.#extensionUiListeners.add(listener);
+		return () => {
+			this.#extensionUiListeners.delete(listener);
+		};
+	}
+
+	/** Answer an `extension_ui_request` dialog. Throws when the client is not started. */
+	respondExtensionUi(response: RpcExtensionUIResponse): void {
+		this.#writeFrame(response);
+	}
+
 	/** Subscribe to live voice frames: `live_phase`, `live_levels`, `live_transcript`, `live_end`. */
 	onLive(listener: RpcLiveListener): () => void {
 		this.#liveListeners.add(listener);
@@ -842,6 +855,15 @@ export class RpcClient {
 	async setFastMode(enabled: boolean): Promise<{ enabled: boolean; active: boolean }> {
 		const response = await this.#send({ type: "set_fast_mode", enabled });
 		return this.#getData(response);
+	}
+
+	/**
+	 * Opt in to structured `ask` dialogs (`extension_ui_request` with `method: "ask"`).
+	 * Returns the state the agent now reports.
+	 */
+	async setAskDialog(enabled: boolean): Promise<boolean> {
+		const response = await this.#send({ type: "set_ask_dialog", enabled });
+		return this.#getData<{ enabled: boolean }>(response).enabled;
 	}
 
 	/**
