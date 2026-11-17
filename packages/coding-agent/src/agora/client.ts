@@ -246,10 +246,17 @@ export class AgoraClient {
 		return { id: a.id, url: a.url, filename: a.filename, mime: a.mime, kind: a.kind, size: a.size };
 	}
 
-	/** Same-origin only: the bearer token is never sent to another host. Throws when the file exceeds `maxBytes`. */
+	/**
+	 * The bearer token only ever goes to the configured Agora origin. Agora writes attachment URLs with its own public
+	 * URL, which can differ from the one this daemon reaches it by (localhost, another tailnet name): such URLs are
+	 * fetched by path from the configured origin; any other foreign URL is refused. Throws when the file exceeds `maxBytes`.
+	 */
 	async download(url: string, dest: string, maxBytes: number): Promise<void> {
-		const target = new URL(url, this.#base);
-		if (target.origin !== this.#base.origin) throw new Error(`refusing to download from ${target.origin}`);
+		let target = new URL(url, this.#base);
+		if (target.origin !== this.#base.origin) {
+			if (!target.pathname.startsWith("/api/v1/attachments/")) throw new Error(`refusing to download from ${target.origin}`);
+			target = new URL(target.pathname + target.search, this.#base);
+		}
 		const res = await this.#fetch(target.toString(), {
 			headers: this.#headers(),
 			signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS),

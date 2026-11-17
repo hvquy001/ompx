@@ -1,5 +1,5 @@
 import * as os from "node:os";
-import { getAgentDir, getProjectDir, logger } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getProjectDir, logger, postmortem } from "@oh-my-pi/pi-utils";
 import { Args, CliUsageError, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { agoraHelp as commandHelp } from "../cli/command-help";
 import { Settings } from "../config/settings";
@@ -57,15 +57,13 @@ export default class Agora extends Command {
 			agentDir: getAgentDir(),
 			log: logger,
 		});
-		const onSignal = () => void daemon.stop();
-		process.once("SIGTERM", onSignal);
-		process.once("SIGINT", onSignal);
+		// postmortem owns SIGTERM/SIGINT and exits after its cleanups: stopping here posts the restart notice first.
+		const cancelCleanup = postmortem.register("agora-daemon", () => daemon.stop(), { exitOnly: true });
 		console.log(`ompx agora: serving ${env.url}`);
 		try {
 			await daemon.run({ once: flags.once });
 		} finally {
-			process.off("SIGTERM", onSignal);
-			process.off("SIGINT", onSignal);
+			cancelCleanup();
 			store.close();
 		}
 	}

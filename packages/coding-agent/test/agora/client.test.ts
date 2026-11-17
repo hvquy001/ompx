@@ -177,6 +177,10 @@ describe("AgoraClient REST", () => {
 		expect((await fs.stat(dest)).size).toBe(100);
 
 		await expect(client.download("http://elsewhere.test/x", path.join(dir, "o"), 1000)).rejects.toThrow(/refusing/);
+		// Agora's public URL can name another host than the daemon uses: the attachment is fetched from the configured one.
+		const viaPublic = path.join(dir, "pub.bin");
+		await client.download("http://agora.public.test/api/v1/attachments/a1", viaPublic, 1000);
+		expect((await fs.stat(viaPublic)).size).toBe(100);
 		const big = path.join(dir, "big.bin");
 		await expect(client.download(`${url}/api/v1/attachments/a1`, big, 10)).rejects.toThrow(/larger than/);
 		expect(await Bun.file(big).exists()).toBe(false);
