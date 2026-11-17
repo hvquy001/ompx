@@ -75,6 +75,11 @@ export interface RpcAgentProcess {
 }
 
 export interface RpcClientOptions {
+	/**
+	 * Start the agent in `rpc-ui` mode: it has a UI, so tools that need a person (`ask`, confirmations) are enabled and
+	 * reach this host as `extension_ui_request` frames, which the host must answer with {@link RpcClient.respondExtensionUi}.
+	 */
+	uiDialogs?: boolean;
 	/** Path to the CLI entry point (default: `dist/cli.js`). */
 	cliPath?: string;
 	/**
@@ -377,7 +382,7 @@ export class RpcClient {
 		this.#protocolVersion = 1;
 
 		const cliPath = this.options.cliPath ?? "dist/cli.js";
-		const args = ["--mode", "rpc"];
+		const args = ["--mode", this.options.uiDialogs ? "rpc-ui" : "rpc"];
 
 		if (this.options.provider) {
 			args.push("--provider", this.options.provider);

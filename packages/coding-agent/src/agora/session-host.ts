@@ -410,6 +410,8 @@ export class SessionHost {
 		const rpc = new RpcClient({
 			cwd: this.#opts.cwd,
 			sessionDir: this.#opts.sessionDir,
+			// The chat answers `ask` and confirmations: they arrive as extension UI requests and become question cards.
+			uiDialogs: true,
 			args,
 			customTools: [
 				createAttachTool({

@@ -37,6 +37,19 @@ describe("RpcClient.start", () => {
 			"--no-session",
 		]);
 	});
+	test("uiDialogs starts the agent in rpc-ui mode so person-facing tools are enabled", async () => {
+		let received: string[] | undefined;
+		using client = new RpcClient({
+			uiDialogs: true,
+			command: args => {
+				received = args;
+				return [process.execPath, "--eval", "process.exit(1)"];
+			},
+		});
+
+		await expect(client.start()).rejects.toThrow(/exited with code 1/);
+		expect(received?.slice(0, 2)).toEqual(["--mode", "rpc-ui"]);
+	});
 });
 
 describe("RpcClient stdin failures", () => {
