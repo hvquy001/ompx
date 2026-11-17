@@ -731,12 +731,7 @@ function obfuscateMessageBatch(obfuscator: SecretObfuscator, messages: Message[]
 		const target = current as UserFacingMessage;
 		if (target.role === "toolResult") {
 			const content = obfuscateTextBlocks(obfuscator, target.content, sharedRegexSecretValues);
-			const details =
-				target.details === undefined
-					? undefined
-					: mapJsonStrings(target.details as JsonValue, text =>
-							obfuscator.obfuscate(text, sharedRegexSecretValues),
-						);
+			const details = obfuscateToolResultDetails(obfuscator, target.details, sharedRegexSecretValues);
 			if (content === target.content && details === target.details) return current;
 			changed = true;
 			return { ...target, content, details };
@@ -753,6 +748,26 @@ function obfuscateMessageBatch(obfuscator: SecretObfuscator, messages: Message[]
 		return { ...target, content } as Message;
 	});
 	return changed ? result : messages;
+}
+
+/**
+ * Redact tool-result details. A bash `trace` is a native archive whose units
+ * address `script` by byte offset; placeholder substitution changes lengths,
+ * so a rewritten trace cannot be restored. Drop it instead of persisting a
+ * corrupt archive — the transcript then renders the command without replay.
+ */
+function obfuscateToolResultDetails(
+	obfuscator: SecretObfuscator,
+	details: unknown,
+	sharedRegexSecretValues: SecretValueSet,
+): unknown {
+	if (details === undefined) return undefined;
+	const redacted = mapJsonStrings(details as JsonValue, text => obfuscator.obfuscate(text, sharedRegexSecretValues));
+	if (redacted === details || !isRecord(details) || !isRecord(redacted) || redacted.trace === details.trace) {
+		return redacted;
+	}
+	const { trace: _trace, ...rest } = redacted;
+	return rest;
 }
 
 /**

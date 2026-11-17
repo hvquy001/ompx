@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `--resume` crashing with "trace unit lies outsZZe script" on sessions where a bash command contained a redacted secret; the command now renders without step replay.
+
 ## [1.11.10] - 2026-10-21
 
 ### Changed

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { RunTrace, Shell } from "@oh-my-pi/pi-natives";
+import { RunTrace, Shell, ShellVisualization } from "@oh-my-pi/pi-natives";
 import { isShellTrace, type ShellTrace, type ShellVizPresentation } from "@oh-my-pi/pi-wire";
 import {
 	attachShellTrace,
@@ -71,6 +71,19 @@ describe("native shell presentation boundary", () => {
 		const output = Bun.stripANSI(renderShellVisualization(presentation, selectedTheme, 100).join("\n"));
 		expect(output.match(/×/g)).toHaveLength(1);
 		expect(output).toContain("false first second");
+	});
+
+	it("renders the command instead of crashing when a persisted archive's units overrun its script", async () => {
+		const command = "echo super-secret-value-123 | wc -c";
+		const trace = new RunTrace(command);
+		const result = await new Shell().run({ command, trace });
+		expect(result.exitCode).toBe(0);
+		const stored = snapshot(trace);
+		// Sessions written before the fix: redaction shortened `script`, unit byte offsets kept.
+		const corrupt = { ...stored, script: stored.script.replace("super-secret-value-123", "$$X:M$$") };
+		expect(() => new ShellVisualization(JSON.stringify(corrupt))).toThrow("trace unit lies outside script");
+		const presentation = readShellPresentation(shellVisualization(corrupt), defaultShellVizPreferences(), corrupt);
+		expect(presentation.rows.flatMap(row => row.segments.map(segment => segment.text)).join(" ")).toContain("wc");
 	});
 
 	it("uses the sink only live and replays real captured output from live or stored traces", async () => {

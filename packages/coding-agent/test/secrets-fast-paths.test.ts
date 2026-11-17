@@ -26,6 +26,27 @@ describe("SecretObfuscator batch scans", () => {
 		expect(output).not.toContain("tok_abc123");
 		expect(output).not.toContain(key);
 	});
+
+	it("drops a bash trace archive whose script needed redaction, keeping clean traces intact", () => {
+		const obfuscator = new SecretObfuscator([{ type: "regex", content: "tok_[a-z0-9]+" }]);
+		const toolResult = (script: string): Message => ({
+			role: "toolResult",
+			toolCallId: "call-1",
+			toolName: "bash",
+			content: [{ type: "text", text: "ok" }],
+			details: { wallTimeMs: 5, trace: { v: 1, script, units: [{ at: 0, bytes: script.length }] } },
+			isError: false,
+			timestamp: 1,
+		});
+		// Placeholder substitution would desync unit byte offsets from `script`.
+		const [secret] = obfuscateMessages(obfuscator, [toolResult("echo tok_abc123")]);
+		expect(JSON.stringify(secret)).not.toContain("tok_abc123");
+		expect(secret?.role === "toolResult" && secret.details).toEqual({ wallTimeMs: 5 });
+
+		const clean = toolResult("echo hello");
+		const [kept] = obfuscateMessages(obfuscator, [clean]);
+		expect(kept).toBe(clean);
+	});
 });
 
 describe("SecretObfuscator probe gating", () => {

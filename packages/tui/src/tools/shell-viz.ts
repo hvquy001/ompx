@@ -1,4 +1,5 @@
 import { RunTrace, ShellVisualization, type ShellVizOptions } from "@oh-my-pi/pi-natives";
+import { logger } from "@oh-my-pi/pi-utils";
 import type {
 	ShellTrace,
 	ShellVizPreferences,
@@ -17,11 +18,20 @@ export function attachShellTrace(snapshot: ShellTrace, trace: RunTrace): void {
 	visualizations.set(snapshot, trace);
 }
 
-/** Historical traces restore their canonical native archive only once per snapshot. */
+/**
+ * Historical traces restore their canonical native archive only once per snapshot.
+ * An archive the engine rejects (e.g. sessions persisted before secret redaction
+ * stopped rewriting `trace.script`) falls back to a static trace of its script.
+ */
 export function shellVisualization(snapshot: ShellTrace): ShellVisualizationSource {
 	let visualization = visualizations.get(snapshot);
 	if (!visualization) {
-		visualization = new ShellVisualization(JSON.stringify(snapshot));
+		try {
+			visualization = new ShellVisualization(JSON.stringify(snapshot));
+		} catch (error) {
+			logger.warn("Shell trace archive cannot be restored; showing static command", { error: String(error) });
+			visualization = new RunTrace(snapshot.script);
+		}
 		visualizations.set(snapshot, visualization);
 	}
 	return visualization;
