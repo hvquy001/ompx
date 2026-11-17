@@ -6,6 +6,10 @@ export const acpHelp = {
 
 export const agentsHelp = { description: "Manage bundled task agents" } satisfies CommandMetadata;
 
+export const agoraHelp = {
+	description: "Run the Agora chat bridge so people can drive ompx sessions from Agora chats",
+} satisfies CommandMetadata;
+
 export const annotateHelp = {
 	description: "Write the OMPx Annotate Chrome extension to disk with load-unpacked steps",
 } satisfies CommandMetadata;

@@ -5,6 +5,9 @@
 ### Fixed
 
 - Fixed `--resume` crashing with "trace unit lies outside script" on sessions where a bash command contained a redacted secret; the command now renders without step replay.
+### Added
+
+- Added `ompx agora serve`: a background bridge that lets people chat with ompx from an Agora conversation. Each conversation drives its own `ompx --mode rpc` session in the configured repository (or, after `/branch` or Agora's "Branch from here", in a fresh git worktree with a fork of the transcript). Images, files, replies and page context reach the model; replies, attachments (`agora_attach`), tool steps, plans, diffs, streamed drafts and question cards flow back. Results from background jobs are posted when they finish. Only allowlisted people (`agora.allowedUsers`) can drive it. See `docs/agora-bridge.md`.
 
 ## [1.11.10] - 2026-10-21
 
