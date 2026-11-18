@@ -69,6 +69,16 @@ The sessions run shell commands as your user on this machine. Allow only people 
    loginctl enable-linger "$USER"   # keep it running after logout
    ```
 
+### More than one workspace
+
+An Agora token belongs to one workspace, so run one daemon per workspace. Each gets its own identity file and state file (`agora/state-<workspace>.db`), and can pick its own default repository:
+
+```sh
+ompx agora serve --env ~/.config/agora-ompx/env-bynai --repo bynai
+```
+
+A systemd template unit (`ompx-agora@.service` with `ExecStart=%h/.local/bin/ompx agora serve --env %h/.config/agora-ompx/env-%i --repo %i`) runs one per workspace: `systemctl --user enable --now ompx-agora@bynai`.
+
 ## Chat commands
 
 | Command | What it does |
