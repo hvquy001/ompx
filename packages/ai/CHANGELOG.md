@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Antigravity CLI requests failing with `Unknown model ID` (e.g. `gemini-4-hydrogen`) when `agy` only offers effort-suffixed models such as `gemini-4-hydrogen-high` ([#19638](https://github.com/can1357/oh-my-pi/issues/19638))
+
+## [18.22.2] - 2026-11-18
+
 ### Added
 
 - Added `riskAcknowledgement` to `OAuthPrompt`, set on the login-warning acceptance prompt so hosts that refuse input before the auth URL can still show it ([#19523](https://github.com/can1357/oh-my-pi/issues/19523))
