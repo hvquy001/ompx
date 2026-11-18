@@ -47,8 +47,9 @@ create table if not exists binding (
 create table if not exists posted (conversation_id text, entry_id text, message_id text, primary key (conversation_id, entry_id));
 `;
 
-export function defaultAgoraStorePath(): string {
-	return path.join(getAgentDir(), "agora", "state.db");
+/** One store per Agora workspace a daemon serves; the default (`trdo`-era) file keeps its name. */
+export function defaultAgoraStorePath(workspace?: string): string {
+	return path.join(getAgentDir(), "agora", workspace ? `state-${workspace}.db` : "state.db");
 }
 
 export class AgoraStore {
