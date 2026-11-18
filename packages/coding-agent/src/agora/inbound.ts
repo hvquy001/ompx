@@ -28,7 +28,7 @@ const EXCERPT_MAX = 300;
 const OMITTED_REPLY = "[earlier message from someone else omitted]";
 
 /** Wrap text from outside the trust boundary; the closing tag inside the text is defused so it cannot end the block early. */
-function quoted(text: string): string {
+export function quoted(text: string): string {
 	return `<quoted untrusted>\n${text.replaceAll("</quoted", "<\\/quoted")}\n</quoted>`;
 }
 

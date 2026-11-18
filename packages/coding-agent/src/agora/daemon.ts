@@ -7,7 +7,7 @@ import * as path from "node:path";
 import type { Settings } from "../config/settings";
 import type { AgoraActor, AgoraChatMessage, AgoraClient, AgoraEvent } from "./client";
 import { AgoraCommands } from "./commands";
-import { type ChatHistoryItem, toInboundTurn } from "./inbound";
+import { type ChatHistoryItem, quoted, toInboundTurn } from "./inbound";
 import type { HostTimers, HostTurn, SessionHostOptions } from "./session-host";
 import type { AgoraBinding, AgoraStore } from "./store";
 
@@ -15,6 +15,10 @@ const EVENT_TYPES = ["chat.message", "chat.branched", "agent.question_answered"]
 const WAIT_NOTE_MS = 60_000;
 const SETTLE_POLL_MS = 100;
 const MAX_TITLE = 100;
+const PARENT_PAGE_SIZE = 50;
+const MAX_PARENT_PAGES = 4;
+const MAX_PARENT_MESSAGE = 2000;
+const MAX_PARENT_CHARS = 30_000;
 const REFUSAL = "I only take requests from people set up on this machine. Ask the owner to add you.";
 const RESTART_NOTE = "ompx restarted; send your message again";
 
@@ -49,7 +53,16 @@ export interface DaemonLog {
 export interface AgoraDaemonDeps {
 	client: Pick<
 		AgoraClient,
-		"me" | "postMessage" | "setStatus" | "download" | "stream" | "branch" | "patchConversation" | "createConversation"
+		| "me"
+		| "postMessage"
+		| "setStatus"
+		| "download"
+		| "stream"
+		| "branch"
+		| "patchConversation"
+		| "createConversation"
+		| "getConversation"
+		| "listMessages"
 	>;
 	store: Pick<
 		AgoraStore,
@@ -113,6 +126,8 @@ export class AgoraDaemon {
 	readonly #live = new Map<string, Live>();
 	readonly #queue: Queued[] = [];
 	readonly #titles = new Map<string, string>();
+	/** Conversations whose first-turn branch context was settled (sent, or not a branch). */
+	readonly #seeded = new Set<string>();
 	readonly #trustedActors = new Set<string>();
 	readonly #abort = new AbortController();
 	readonly #timers: Pick<HostTimers, "setInterval" | "clearInterval">;
@@ -311,6 +326,8 @@ export class AgoraDaemon {
 			await this.#say(conv, "I couldn't read that message. Try sending it again.");
 			return false;
 		}
+		const prefix = await this.#branchPrefix(conv, binding);
+		if (prefix) turn = { ...turn, text: prefix + turn.text };
 		this.#enqueue(conv, binding, turn);
 		return true;
 	}
@@ -356,6 +373,70 @@ export class AgoraDaemon {
 			return null;
 		}
 		return binding;
+	}
+
+	/**
+	 * A branch's first turn into a fresh session (no transcript, no `--fork`) carries its parent chat up to the branch
+	 * point, so the agent has the context the reader sees. Empty when not applicable or on any fetch failure.
+	 */
+	async #branchPrefix(conv: string, binding: AgoraBinding): Promise<string> {
+		if (binding.forked_from || this.#seeded.has(conv) || hasTranscript(binding.session_dir)) return "";
+		const { client, log } = this.#deps;
+		try {
+			const self = await client.getConversation(conv);
+			if (!self.parent_id) {
+				this.#seeded.add(conv);
+				return "";
+			}
+			const messages: AgoraChatMessage[] = [];
+			let before: string | undefined;
+			for (let page = 0; page < MAX_PARENT_PAGES; page++) {
+				const res = await client.listMessages(self.parent_id, { limit: PARENT_PAGE_SIZE, before });
+				messages.unshift(...res.messages);
+				if (!self.branch_from_message_id || res.messages.some(m => m.id === self.branch_from_message_id)) break;
+				if (!res.next_before) break;
+				before = res.next_before;
+			}
+			let upto = messages;
+			if (self.branch_from_message_id) {
+				const at = messages.findIndex(m => m.id === self.branch_from_message_id);
+				if (at < 0) {
+					log.warn("agora: branch point not in parent history", { conversation: conv, parent: self.parent_id });
+					return "";
+				}
+				upto = messages.slice(0, at + 1);
+			}
+			this.#seeded.add(conv);
+			return this.#renderParent(self.title, upto);
+		} catch (error) {
+			log.warn("agora: could not load parent chat", { conversation: conv, error: String(error) });
+			return "";
+		}
+	}
+
+	/** Newest messages that fit `MAX_PARENT_CHARS`, oldest first; text from people off the allowlist is quoted as untrusted. */
+	#renderParent(title: string | null, messages: AgoraChatMessage[]): string {
+		const lines: string[] = [];
+		let total = 0;
+		let omitted = false;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i];
+			const body = m.body.trim();
+			if (!body) continue;
+			const name = m.author?.username ?? "unknown";
+			const text = clip(body, MAX_PARENT_MESSAGE);
+			const trusted = m.author !== null && (m.author.kind === "agent" || this.#trustedActors.has(m.author.id));
+			const line = trusted ? `@${name}: ${text}` : `@${name}:\n${quoted(text)}`;
+			if (total + line.length > MAX_PARENT_CHARS) {
+				omitted = true;
+				break;
+			}
+			total += line.length;
+			lines.unshift(line);
+		}
+		if (lines.length === 0) return "";
+		const head = `This chat is a branch of "${clip((title ?? "untitled").replace(/\s+/g, " "), MAX_TITLE)}". The parent chat up to the branch point:`;
+		return `${head}\n${omitted ? "[earlier messages omitted]\n" : ""}${lines.join("\n")}\n\n`;
 	}
 
 	/** Chat commands (see `commands.ts`). Returns true when the message was consumed; any other `/word` goes to the session. */

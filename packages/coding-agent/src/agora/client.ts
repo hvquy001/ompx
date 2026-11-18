@@ -42,6 +42,12 @@ export interface AgoraEvent {
 	type: string;
 	data: Record<string, unknown>;
 }
+export interface AgoraConversation {
+	id: string;
+	title: string | null;
+	parent_id: string | null;
+	branch_from_message_id: string | null;
+}
 export type AgoraStepKind = "tool" | "thinking" | "plan" | "diff" | "note" | "question";
 export type AgoraStepStatus = "running" | "done" | "failed" | "waiting" | "answered" | "cancelled";
 export interface AgoraStep {
@@ -167,6 +173,32 @@ export class AgoraClient {
 		return actorOf(((await res.json()) as { actor: unknown }).actor);
 	}
 
+	/** A conversation's title and branch link (`parent_id`/`branch_from_message_id` are null unless it is a branch). */
+	async getConversation(conversation: string): Promise<AgoraConversation> {
+		const res = await this.#send("GET", `/chat/conversations/${encodeURIComponent(conversation)}`);
+		const c = ((await res.json()) as { conversation: Partial<AgoraConversation> & { id: string } }).conversation;
+		return {
+			id: c.id,
+			title: c.title ?? null,
+			parent_id: c.parent_id ?? null,
+			branch_from_message_id: c.branch_from_message_id ?? null,
+		};
+	}
+
+	/** One history page, oldest first; `next_before` pages further back (`before` = a message id, strictly older). */
+	async listMessages(
+		conversation: string,
+		opts: { limit?: number; before?: string } = {},
+	): Promise<{ messages: AgoraChatMessage[]; next_before: string | null }> {
+		const query = new URLSearchParams();
+		if (opts.limit !== undefined) query.set("limit", String(opts.limit));
+		if (opts.before) query.set("before", opts.before);
+		const qs = query.size > 0 ? `?${query}` : "";
+		const res = await this.#send("GET", `/chat/conversations/${encodeURIComponent(conversation)}/messages${qs}`);
+		const body = (await res.json()) as { messages: AgoraChatMessage[]; next_before?: string | null };
+		return { messages: body.messages, next_before: body.next_before ?? null };
+	}
+
 	async postMessage(
 		conversation: string,
 		msg: { body: string; attachment_ids?: string[]; reply_to?: string; turn_id?: string },
@@ -254,7 +286,8 @@ export class AgoraClient {
 	async download(url: string, dest: string, maxBytes: number): Promise<void> {
 		let target = new URL(url, this.#base);
 		if (target.origin !== this.#base.origin) {
-			if (!target.pathname.startsWith("/api/v1/attachments/")) throw new Error(`refusing to download from ${target.origin}`);
+			if (!target.pathname.startsWith("/api/v1/attachments/"))
+				throw new Error(`refusing to download from ${target.origin}`);
 			target = new URL(target.pathname + target.search, this.#base);
 		}
 		const res = await this.#fetch(target.toString(), {
