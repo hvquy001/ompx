@@ -4,6 +4,12 @@
 
 ### Added
 
+- Added Gemini 4 Neon (`gemini-4-neon`) on Google and Vertex AI ($3/$15 per million tokens, $0.15 cached, 1M context, long decodes, and low/medium/high/xhigh thinking levels).
+
+## [19.0.0] - 2026-11-18
+
+### Added
+
 - Added Claude Fable 5.2 and Claude Mythos 5.2 ($8/$40 per MTok, $0.20 cache reads, 1M context)
 
 ### Fixed
