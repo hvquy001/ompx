@@ -5,6 +5,7 @@
 ### Added
 
 - Added Gemini 4 Neon (`gemini-4-neon`) on Google and Vertex AI ($3/$15 per million tokens, $0.15 cached, 1M context, long decodes, and low/medium/high/xhigh thinking levels).
+- Added Gemini 4 Neon (`gemini-4-neon`) to the Antigravity CLI provider with low, medium, high, and xhigh thinking levels; it is now the provider's default model, matching what `agy` selects for a new session
 
 ## [19.0.0] - 2026-11-18
 
