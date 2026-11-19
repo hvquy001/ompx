@@ -46,6 +46,12 @@ const ANNOUNCEMENT_TIMEOUT_MS = 2_000;
 const HOLD_LIMIT_MS = 165_000;
 const CANCEL_TIMEOUT_MS = 5_000;
 const MCP_TOOL_NAME = /\bmcp_ide-tools_(\S+)/;
+/**
+ * agy reports backend failures as assistant text (`⚠ API error (attempt N): RESOURCE_EXHAUSTED (code 429): …`,
+ * `⚠ INVALID_ARGUMENT (code 400): …`). Such a status line is a provider failure, not model output: surface it so
+ * the session can retry, rotate the account, or fall back instead of showing it as the answer.
+ */
+const AGY_ERROR_NOTICE = /^\s*⚠ (?:API error \(attempt \d+\):\s*)?([A-Z][A-Z_]+ \(code \d{3}\):[^\n]*)/;
 
 /** Per-step request settings. */
 export interface AgyStepOptions {
@@ -713,9 +719,16 @@ export class AgyHost implements ProviderSessionState {
 		const update = notification.update;
 		const writer = this.#step?.aborted ? undefined : this.#step?.writer;
 		switch (update.sessionUpdate) {
-			case "agent_message_chunk":
-				if (update.content.type === "text") writer?.text(update.content.text);
+			case "agent_message_chunk": {
+				if (update.content.type !== "text") return;
+				const notice = AGY_ERROR_NOTICE.exec(update.content.text);
+				if (notice) {
+					this.#fail(new Error(`Antigravity CLI request failed: ${notice[1].trim()}`));
+					return;
+				}
+				writer?.text(update.content.text);
 				return;
+			}
 			case "agent_thought_chunk":
 				if (update.content.type === "text") writer?.thinking(update.content.text);
 				return;

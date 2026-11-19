@@ -63,7 +63,7 @@ const nativeComputerSchema = type({
 		.describe(
 			"Ordered screen actions in current viewport pixels. navigate: {url}; click/double_click/move: {x,y}; scroll: {x,y,scroll_x,scroll_y}; drag: {path:[{x,y},...]}; keypress: {keys:['Enter']} or {keys:['Control','a']} (modifiers are held while the other keys are pressed; aliases like CTRL/CMD/ENTER accepted); type: {text}; wait; screenshot ({save?} writes that capture to a file). A screenshot is returned after the last action. Any other type fails the call.",
 		),
-	"pending_safety_checks?": type("unknown[]").describe("Safety checks requiring explicit approval"),
+	"pending_safety_checks?": type("object[]").describe("Safety checks requiring explicit approval"),
 	"+": "reject",
 });
 type NativeComputerInput = typeof nativeComputerSchema.infer;

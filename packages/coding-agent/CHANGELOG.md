@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Fixed Antigravity CLI rejecting every request with `400 INVALID_ARGUMENT` because the `browser_use` tool's `pending_safety_checks` array had no item type
+- Fixed Antigravity CLI requests failing with `429 RESOURCE_EXHAUSTED` on every turn: system prompt and tool-doc lines that Google's endpoint rejects are reworded
 - Fixed `--resume` crashing with "trace unit lies outside script" on sessions where a bash command contained a redacted secret; the command now renders without step replay.
 ### Added
 

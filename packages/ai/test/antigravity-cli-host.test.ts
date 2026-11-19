@@ -280,6 +280,38 @@ describe("AgyHost stateful steps", () => {
 		await expect(run.done).rejects.toThrow("without a usable response");
 		expect(fake.closed).toBe(true);
 	});
+	it("fails the step on agy's 429 retry notice instead of streaming it as an answer", async () => {
+		const state = await fixture();
+		const run = step(state.host, [user("hello")]);
+		const fake = await state.started.next();
+		await fake.prompts.next();
+		fake.text(
+			"\n⚠ API error (attempt 1): RESOURCE_EXHAUSTED (code 429): Resource has been exhausted (e.g. check quota).\n",
+		);
+		await expect(run.done).rejects.toThrow("RESOURCE_EXHAUSTED (code 429)");
+		expect(run.writer.output.content.some(block => block.type === "text" && block.text.length > 0)).toBe(false);
+		expect(fake.closed).toBe(true);
+	});
+	it("fails the step on agy's request-rejection notice", async () => {
+		const state = await fixture();
+		const run = step(state.host, [user("hello")]);
+		const fake = await state.started.next();
+		await fake.prompts.next();
+		fake.text("\n⚠ INVALID_ARGUMENT (code 400): * GenerateContentRequest.tools[13]: missing field.\n");
+		await expect(run.done).rejects.toThrow("INVALID_ARGUMENT (code 400)");
+	});
+	it("streams model text that merely mentions an API error", async () => {
+		const state = await fixture();
+		const run = step(state.host, [user("hello")]);
+		const fake = await state.started.next();
+		const prompt = await fake.prompts.next();
+		fake.text("A 429 means the API error is a rate limit.");
+		prompt.response.resolve({ stopReason: "end_turn" });
+		await run.done;
+		expect(run.writer.output.content).toContainEqual(
+			expect.objectContaining({ type: "text", text: "A 429 means the API error is a rate limit." }),
+		);
+	});
 	it("selects the model and thought level agy advertises, including effort-suffixed rosters", async () => {
 		const turn = async (roster: string[], efforts: (string | undefined)[]) => {
 			const state = await fixture({}, roster);

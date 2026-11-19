@@ -10,7 +10,7 @@ Hashline patches existing files; new files: `write`. Each file: `[PATH#TAG]`, `T
 
 <rules>
 - `:` ops only: body rows `+TEXT` verbatim incl. indent; lone `+` blank. Literal `- item`/`+ item` → `+- item`/`++ item`. NEVER `-`/bare context. Body length independent of range; delete with CUT, not empty PUT.
-- Touch displayed changed lines only; `…`, `..`, collapsed `N-M:` and out-of-window lines UNSEEN. Re-read first. Tight ranges: split nonadjacent changes; NEVER include keepers or start/end mid-expression/block. Pure addition uses gap PUT.
+- Edit only changed lines you can see; `…`, `..`, collapsed `N-M:` ranges and lines outside the window are unseen, so re-read them first. Keep ranges tight: split nonadjacent changes, never include unchanged lines or start/end inside an expression or block. A pure addition uses a gap PUT.
 - `*` requires multi-line opener, NEVER closer/last/inner statement; use range/gap for one statement. Anchor first decorator/attribute/doc-comment to include it; standalone comments need explicit range.
 - Markdown heading blocks run through deeper headings until next same/higher; after section `PUT >N*:`, end body with blank line.
 - NEVER restyle unrelated code. After EVERY edit tag/numbers change: use edit response or fresh `read`; stale tag/surprise → STOP, re-read.

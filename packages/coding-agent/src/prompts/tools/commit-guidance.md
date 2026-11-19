@@ -1,1 +1,1 @@
-To commit your changes, use the eval `commit` namespace (`d = await commit.draft()`, then `await d.commit("subject", ["- body"])`), not `git add`/`git commit`: it selects only the lines you and your subagents wrote and never touches other agents' staged or unstaged work.
+Commit through the eval `commit` namespace (`d = await commit.draft()`, then `await d.commit("subject", ["- body"])`) instead of `git add`/`git commit`: it picks only the lines you and your subagents wrote and leaves other agents' staged and unstaged work alone.
