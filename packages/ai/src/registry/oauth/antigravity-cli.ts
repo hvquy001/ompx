@@ -10,6 +10,7 @@ import {
 	exportAgyCredentials,
 	refreshAgyCredentials,
 } from "../../providers/antigravity-cli/credentials";
+import { type OAuthLaunchShortcut, serveOAuthLaunchShortcut } from "./callback-server";
 import type { OAuthController, OAuthCredentials } from "./types";
 
 const PROVIDER = "antigravity-cli";
@@ -164,6 +165,7 @@ export async function loginAntigravityCli(ctrl: OAuthController): Promise<OAuthC
 	await cleanupAbandonedLoginDirectories(root);
 	const directory = await fs.mkdtemp(path.join(root, "login-"));
 	let child: Subprocess<"pipe", "pipe", "pipe"> | undefined;
+	let shortcut: OAuthLaunchShortcut | undefined;
 	let signedIn = false;
 	let exported = false;
 	try {
@@ -221,9 +223,16 @@ export async function loginAntigravityCli(ctrl: OAuthController): Promise<OAuthC
 					),
 				error => authUrl.reject(error),
 			);
+			const url = await bounded(authUrl.promise, signal, START_TIMEOUT_MS);
+			// agy's redirect lands on an Antigravity page that shows the code, so
+			// the login works from any device; the shortcut spares copying the URL.
+			shortcut = serveOAuthLaunchShortcut(url);
 			ctrl.onAuth?.({
-				url: await bounded(authUrl.promise, signal, START_TIMEOUT_MS),
-				instructions: "Sign in with Google, then paste the authorization code or the callback URL.",
+				url,
+				launchUrl: shortcut.launchUrl,
+				tailnetLaunchUrl: shortcut.tailnetLaunchUrl,
+				instructions:
+					"Sign in with Google, copy the code shown on the Antigravity page, then paste the code or the page URL here.",
 			});
 			const input = ctrl.onManualCodeInput
 				? ctrl.onManualCodeInput(signal)
@@ -267,6 +276,7 @@ export async function loginAntigravityCli(ctrl: OAuthController): Promise<OAuthC
 			provider: PROVIDER,
 		});
 	} finally {
+		shortcut?.stop();
 		child?.kill("SIGKILL");
 		if (child) await Promise.race([child.exited.catch(() => {}), Bun.sleep(1000)]);
 		// Do not destroy a completed grant if a future agy format change makes

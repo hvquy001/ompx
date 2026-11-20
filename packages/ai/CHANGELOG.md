@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Antigravity CLI `/login` now offers the short `/launch` link and, when Tailscale is up, a tailnet link, so the long Google sign-in URL no longer has to be copied from a narrow or remote terminal
 - Antigravity CLI backend errors (`⚠ API error (attempt N): RESOURCE_EXHAUSTED …`, `⚠ INVALID_ARGUMENT (code 400) …`) now fail the request so the session can retry, switch account, or fall back, instead of streaming the notice as the model's answer
 - Fixed Antigravity CLI requests failing with `Unknown model ID` (e.g. `gemini-4-hydrogen`) when `agy` only offers effort-suffixed models such as `gemini-4-hydrogen-high` ([#19638](https://github.com/can1357/oh-my-pi/issues/19638))
 - Fixed the managed Antigravity CLI download failing on slow connections and being reported as a sign-in timeout; it now aborts only after 60 seconds with no data and reports the bytes received ([#19463](https://github.com/can1357/oh-my-pi/issues/19463))

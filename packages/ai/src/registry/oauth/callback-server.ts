@@ -118,6 +118,49 @@ function activeTailnetAddress(): string | undefined {
 	return undefined;
 }
 
+/** A `/launch` redirect for flows without a loopback callback server. */
+export interface OAuthLaunchShortcut {
+	/** Loopback `/launch`, opens the login on this machine. */
+	launchUrl: string;
+	/** Same route on this host's Tailscale address, when a tailnet is up. */
+	tailnetLaunchUrl: string | undefined;
+	stop(): void;
+}
+
+/**
+ * Serve `/launch` → 302 to `authUrl` on loopback and, when Tailscale is up, on
+ * the tailnet address too. For paste-code logins whose redirect lands on a
+ * provider page (no callback to this host): the shortcut only spares the user
+ * copying a long, truncation-prone URL, so it carries no secret beyond the
+ * authorization URL the UI already prints.
+ */
+export function serveOAuthLaunchShortcut(authUrl: string): OAuthLaunchShortcut {
+	const fetch = (req: Request): Response =>
+		new URL(req.url).pathname === LAUNCH_PATH
+			? Response.redirect(authUrl, 302)
+			: new Response("Not Found", { status: 404 });
+	const loopback = Bun.serve({ hostname: IPV4_LOOPBACK, port: 0, reusePort: false, fetch });
+	const servers: Bun.Server<unknown>[] = [loopback];
+	let tailnetLaunchUrl: string | undefined;
+	const address = activeTailnetAddress();
+	if (address) {
+		try {
+			const tailnet = Bun.serve({ hostname: address, port: 0, reusePort: false, fetch });
+			servers.push(tailnet);
+			tailnetLaunchUrl = `http://${address}:${tailnet.port}${LAUNCH_PATH}`;
+		} catch (error) {
+			logger.debug("OAuth launch shortcut could not bind the Tailscale address", { address, error });
+		}
+	}
+	return {
+		launchUrl: `http://${IPV4_LOOPBACK}:${loopback.port}${LAUNCH_PATH}`,
+		tailnetLaunchUrl,
+		stop: () => {
+			for (const server of servers) void server.stop(true);
+		},
+	};
+}
+
 export interface OAuthCallbackFlowOptions {
 	preferredPort: number;
 	callbackPath?: string;

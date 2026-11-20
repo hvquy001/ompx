@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as os from "node:os";
-import { OAuthCallbackFlow } from "@oh-my-pi/pi-ai/registry/oauth/callback-server";
+import { OAuthCallbackFlow, serveOAuthLaunchShortcut } from "@oh-my-pi/pi-ai/registry/oauth/callback-server";
 import type { OAuthAuthInfo, OAuthCredentials } from "@oh-my-pi/pi-ai/registry/oauth/types";
 
 /**
@@ -138,6 +138,40 @@ describe("OAuthCallbackFlow Tailscale shortcut", () => {
 		} finally {
 			abort.abort("test cleanup");
 			await login.catch(() => undefined);
+		}
+	});
+});
+
+describe("serveOAuthLaunchShortcut", () => {
+	const AUTH_URL = "https://accounts.google.com/o/oauth2/auth?client_id=x&scope=a+b";
+
+	it("redirects /launch to the authorization URL on loopback and the tailnet, then stops", async () => {
+		vi.spyOn(os, "networkInterfaces").mockReturnValue(interfaceTable(true));
+		redirectTailnetBind();
+		const shortcut = serveOAuthLaunchShortcut(AUTH_URL);
+		const tailnet = new URL(shortcut.tailnetLaunchUrl ?? "");
+		expect(tailnet.hostname).toBe(TAILNET_ADDRESS);
+		const remote = `http://${STAND_IN_ADDRESS}:${tailnet.port}/launch`;
+		for (const target of [shortcut.launchUrl, remote]) {
+			const launched = await fetch(target, { redirect: "manual" });
+			expect(launched.status).toBe(302);
+			expect(launched.headers.get("location")).toBe(AUTH_URL);
+		}
+		shortcut.stop();
+		await expect(fetch(shortcut.launchUrl)).rejects.toThrow();
+		await expect(fetch(remote)).rejects.toThrow();
+	});
+
+	it("serves only loopback when the tailnet bind fails", async () => {
+		vi.spyOn(os, "networkInterfaces").mockReturnValue(interfaceTable(true));
+		redirectTailnetBind(true);
+		const shortcut = serveOAuthLaunchShortcut(AUTH_URL);
+		try {
+			expect(shortcut.tailnetLaunchUrl).toBeUndefined();
+			const launched = await fetch(shortcut.launchUrl, { redirect: "manual" });
+			expect(launched.headers.get("location")).toBe(AUTH_URL);
+		} finally {
+			shortcut.stop();
 		}
 	});
 });
