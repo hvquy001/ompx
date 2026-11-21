@@ -24,6 +24,7 @@ import {
 	type CompletionProbe,
 	type CompletionProbeInput,
 	type CredentialCompletionResult,
+	type CredentialBalancing,
 	type CredentialHealthResult,
 	completeSimple,
 	type Model,
@@ -95,6 +96,8 @@ export interface AuthGatewayCommandArgs {
 		daemon?: boolean;
 		/** Stream structured gateway logs to the terminal while preserving rotating file logs. */
 		verbose?: boolean;
+		/** How new sessions spread across OAuth accounts: `even` (default) or `drain`. */
+		balance?: CredentialBalancing;
 		/**
 		 * `serve`: JSON file of scoped client tokens, each limited to its own
 		 * models and broker OAuth accounts. Re-read while serving.
@@ -140,6 +143,7 @@ function daemonChildCommand(flags: AuthGatewayCommandArgs["flags"], bind: string
 	const cmd = [...selfCliCommandPrefix(), "auth-gateway", "serve", "--bind", bind];
 	if (flags.noAuth) cmd.push("--no-auth");
 	if (flags.local) cmd.push("--local");
+	if (flags.balance) cmd.push("--balance", flags.balance);
 	if (flags.trustProxyHeaders) cmd.push("--trust-proxy-headers");
 	if (flags.clients !== undefined) cmd.push("--clients", path.resolve(flags.clients));
 	return cmd;
@@ -461,6 +465,7 @@ export function createSerializedRebuilder(run: (force: boolean) => Promise<void>
 
 async function createBrokerCredentialSource(
 	brokerConfig: AuthBrokerClientConfig,
+	credentialBalancing: CredentialBalancing,
 ): Promise<AuthGatewayCredentialSource> {
 	// Build a broker-backed AuthStorage — same pattern as discoverAuthStorage()
 	// in sdk.ts. The gateway never touches local SQLite.
@@ -483,6 +488,7 @@ async function createBrokerCredentialSource(
 		sourceLabel: `broker ${brokerConfig.url}`,
 		accountPolicies,
 		defaultReservePct,
+		credentialBalancing,
 	});
 	await storage.credentials.reload();
 	return {
@@ -494,11 +500,14 @@ async function createBrokerCredentialSource(
 	};
 }
 
-async function createLocalCredentialSource(): Promise<AuthGatewayCredentialSource> {
+async function createLocalCredentialSource(
+	credentialBalancing: CredentialBalancing,
+): Promise<AuthGatewayCredentialSource> {
 	const dbPath = getAgentDbPath();
 	const storage = await AuthStorage.create(dbPath, {
 		configValueResolver: resolveConfigValue,
 		sourceLabel: `local ${dbPath}`,
+		credentialBalancing,
 	});
 	await storage.credentials.reload();
 	return {
@@ -513,11 +522,12 @@ async function createLocalCredentialSource(): Promise<AuthGatewayCredentialSourc
 async function resolveGatewayCredentialSource(
 	flags: AuthGatewayCommandArgs["flags"],
 ): Promise<AuthGatewayCredentialSource> {
+	const credentialBalancing = flags.balance ?? "even";
 	if (!flags.local) {
 		const brokerConfig = await resolveAuthBrokerConfig();
-		if (brokerConfig) return createBrokerCredentialSource(brokerConfig);
+		if (brokerConfig) return createBrokerCredentialSource(brokerConfig, credentialBalancing);
 	}
-	return createLocalCredentialSource();
+	return createLocalCredentialSource(credentialBalancing);
 }
 
 interface GatewayServedModels {

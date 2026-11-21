@@ -9,6 +9,8 @@
 - Fixed `--resume` crashing with "trace unit lies outside script" on sessions where a bash command contained a redacted secret; the command now renders without step replay.
 ### Added
 
+- Added `ompx auth-gateway serve --balance even|drain` (default `even`) so the gateway spreads new sessions across OAuth accounts by usage, and an `x-omp-account` request header that pins a request to one OAuth account (`401` when it is unknown or unusable)
+- Auth gateway `/v1/messages` now forwards Claude Code auto mode's `safeguards` field and `dangerous-tool-use` beta to the official Anthropic API and returns `safeguard_results`, so auto-mode classifier review is not billed as separate requests
 - Added `ompx agora serve`: a background bridge that lets people chat with ompx from an Agora conversation. Each conversation drives its own `ompx --mode rpc` session in the configured repository (or, after `/branch` or Agora's "Branch from here", in a fresh git worktree with a fork of the transcript). Images, files, replies and page context reach the model; replies, attachments (`agora_attach`), tool steps, plans, diffs, streamed drafts and question cards flow back. Results from background jobs are posted when they finish. Only allowlisted people (`agora.allowedUsers`) can drive it. See `docs/agora-bridge.md`.
 
 ## [1.11.10] - 2026-10-21

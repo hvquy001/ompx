@@ -432,8 +432,10 @@ export class KeyCascade implements KeysApi {
 		// runtime, models.yml, stored, env or broker.
 		if (providerPauseReason(provider) !== undefined) return undefined;
 		const restricted = this.#deps.affinity.isRestricted(provider, sessionId);
+		// An `oauthAccount` pin is strict like a restriction: only that OAuth account may serve.
+		const pinned = Boolean(options?.oauthAccount?.trim());
 		// Runtime override takes highest priority
-		const runtimeKey = restricted ? undefined : this.#deps.overrides.runtimeKey(provider);
+		const runtimeKey = restricted || pinned ? undefined : this.#deps.overrides.runtimeKey(provider);
 		if (runtimeKey) {
 			return { apiKey: runtimeKey, origin: { kind: "runtime" } };
 		}
@@ -450,7 +452,7 @@ export class KeyCascade implements KeysApi {
 				`No API key for provider: ${provider} (session ${sessionId} is restricted to its OAuth account pool, but models.yml configures an apiKey for this provider, and pooled OAuth tokens are never sent past it)`,
 			);
 		}
-		const configKey = restricted ? undefined : this.#deps.overrides.configKey(provider);
+		const configKey = restricted || pinned ? undefined : this.#deps.overrides.configKey(provider);
 		if (configKey !== undefined && !options?.preferOAuth) {
 			const apiKey = await this.#deps.overrides.resolve(configKey);
 			if (sessionId) this.#deps.affinity.forget(provider, sessionId);
@@ -480,6 +482,10 @@ export class KeyCascade implements KeysApi {
 				onCredentialId(oauthResolved.credentialId, identity, oauthResolved.credential.access);
 			}
 			return { apiKey: oauthResolved.apiKey, origin: { kind: "oauth" } };
+		}
+		if (pinned) {
+			if (oauthRefreshFailure) throw oauthRefreshFailure;
+			return undefined;
 		}
 		if (restricted) {
 			if (oauthRefreshFailure) throw oauthRefreshFailure;

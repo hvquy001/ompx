@@ -29,11 +29,13 @@ import {
 	type UsageRankingResult,
 } from "./rank";
 import { mergeRefreshedCredential, OAUTH_REFRESH_SKEW_MS, type OAuthRefresher } from "./refresh";
+import { resolveCredentialIdentityKey } from "./sqlite-credential-store";
 import type { AuthCredentialStore } from "./store";
 import {
 	type ApiKeyCredential,
 	type AuthApiKeyOptions,
 	type AuthCredential,
+	type CredentialBalancing,
 	type OAuthCredential,
 	oauthAccountKey,
 	type StoredAuthCredential,
@@ -82,6 +84,20 @@ export interface CredentialSelectorDeps {
 	usage: UsageService;
 	refresher: OAuthRefresher;
 	strategies: RankingStrategyResolver;
+	/** How ranking orders accounts that report usage; see {@link AuthStorageOptions.credentialBalancing}. */
+	balancing: CredentialBalancing;
+}
+
+/**
+ * Whether `credential` is the account an `oauthAccount` pin names: its email,
+ * account id, or identity key, compared case-insensitively. `pin` is already trimmed and lower-cased.
+ */
+function matchesOAuthAccountPin(provider: string, credential: OAuthCredential, pin: string): boolean {
+	return (
+		credential.email?.trim().toLowerCase() === pin ||
+		credential.accountId?.trim().toLowerCase() === pin ||
+		resolveCredentialIdentityKey(provider, credential)?.toLowerCase() === pin
+	);
 }
 
 /** Picks which stored credential serves a request: ordering, usage ranking, OAuth refresh ladder. */
@@ -295,7 +311,7 @@ export class CredentialSelector {
 				orderPos,
 			});
 		}
-		return orderUsageRankedCandidates(ranked, false);
+		return orderUsageRankedCandidates(ranked, false, this.#deps.balancing);
 	}
 
 	async selectApiKey(
@@ -554,7 +570,7 @@ export class CredentialSelector {
 				orderPos,
 			});
 		}
-		return orderUsageRankedCandidates(ranked, args.planGate !== undefined);
+		return orderUsageRankedCandidates(ranked, args.planGate !== undefined, this.#deps.balancing);
 	}
 
 	/**
@@ -640,7 +656,12 @@ export class CredentialSelector {
 		);
 		// A session restriction drops every other account before ranking, pins,
 		// and the fallback passes below, so none of them can route back to it.
-		const credentials = stored.filter(entry => this.#deps.affinity.allows(provider, sessionId, entry.credential));
+		const pinnedAccount = options?.oauthAccount?.trim().toLowerCase();
+		const credentials = stored.filter(
+			entry =>
+				this.#deps.affinity.allows(provider, sessionId, entry.credential) &&
+				(!pinnedAccount || matchesOAuthAccountPin(provider, entry.credential, pinnedAccount)),
+		);
 
 		if (credentials.length === 0) return undefined;
 		// Ranking and preflight both await provider work; preserve the row each
@@ -742,7 +763,9 @@ export class CredentialSelector {
 		// ties (the ranked comparator falls back to `orderPos`) without overriding a strictly-better
 		// sibling — this respects the residual value of a same-account shared static prefix that other
 		// workspace traffic may have kept warm, while still rotating away from a clearly-worse account.
-		const baseRankingOrder = credentials.map((_credential, index) => index);
+		// Drain mode ranks in stored order so equal accounts resolve to one deterministic pick; even
+		// mode ranks in the session-hashed order so equal accounts split new sessions between them.
+		const baseRankingOrder = this.#deps.balancing === "even" ? order : credentials.map((_credential, index) => index);
 		const policyOrder = hasPriorityPolicy
 			? [...baseRankingOrder].sort((leftIndex, rightIndex) => {
 					const leftPriority =
@@ -757,7 +780,7 @@ export class CredentialSelector {
 			shouldRank && sessionId && sessionPreferredIndex !== undefined && !hasPlanRequirement
 				? credentials.findIndex(entry => entry.index === sessionPreferredIndex)
 				: -1;
-		if (sessionPreferredRankingPos > 0) {
+		if (sessionPreferredRankingPos !== -1 && sessionPreferredRankingPos !== baseRankingOrder[0]) {
 			rankingOrder = [
 				sessionPreferredRankingPos,
 				...baseRankingOrder.filter(index => index !== sessionPreferredRankingPos),

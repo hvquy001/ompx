@@ -364,6 +364,13 @@ export type MessageCreateParams = {
 	 * header: `server-side-fallback-2026-06-01`.
 	 */
 	fallbacks?: FallbackParam[];
+	/**
+	 * Server-side safety classifiers to run on this turn's tool calls, e.g.
+	 * Claude Code auto mode's `{ type: "dangerous_tool_use", classifier_context }`.
+	 * Paired with a `dangerous-tool-use-*` beta header; verdicts come back as
+	 * `safeguard_results`. Entries are forwarded verbatim.
+	 */
+	safeguards?: unknown[];
 	/** Fallback credit token redeemed from a prior refusal (`fallback-credit-2026-06-01` / `fallback-credit-2026-07-01`). */
 	fallback_credit_token?: string;
 	/** Message threads beta: start or continue a server-held conversation. */
@@ -451,6 +458,7 @@ export type ResponseMessage = {
 	stop_reason?: StopReason | null;
 	stop_sequence?: string | null;
 	input_transformations?: InputTransformation[];
+	safeguard_results?: unknown[] | null;
 	usage: Usage;
 };
 
@@ -493,6 +501,7 @@ export type MessageDelta = {
 	stop_sequence?: string | null;
 	stop_details?: StopDetails | null;
 	input_transformations?: InputTransformation[];
+	safeguard_results?: unknown[] | null;
 };
 
 export type RawMessageStartEvent = { type: "message_start"; message: ResponseMessage };

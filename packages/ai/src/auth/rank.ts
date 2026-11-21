@@ -1,5 +1,5 @@
 import type { PlanGate, UsageReport } from "../usage";
-import type { AuthCredential, ApiKeyCredential, OAuthCredential } from "./types";
+import type { AuthCredential, ApiKeyCredential, CredentialBalancing, OAuthCredential } from "./types";
 
 /** Selected stored credential and its pool index. */
 export type CredentialSelection<T extends AuthCredential> = {
@@ -69,6 +69,12 @@ const USAGE_RANKING_METRIC_EPSILON = 1e-9;
  * window means an imminent mid-session block, so drain urgency defers to it.
  */
 const PRIMARY_WINDOW_HOT_FRACTION = 0.85;
+/**
+ * `"even"` balancing treats accounts whose used fractions sit in the same band
+ * of this width as equal, so near-equal accounts split new sessions by session
+ * hash instead of every session piling onto whichever is marginally less used.
+ */
+const EVEN_BALANCING_USAGE_BAND = 0.05;
 
 /** Rank accounts by model-plan eligibility when a plan gate applies. */
 export function planPriority(gate: PlanGate | undefined, report: UsageReport | null): number {
@@ -85,10 +91,23 @@ function compareUsageRankingMetric(left: number, right: number): number {
 	return Math.abs(delta) <= tolerance ? 0 : delta;
 }
 
+/**
+ * Compare used fractions by fixed-width bucket. Buckets (not a pairwise
+ * tolerance) keep the comparator transitive, which `Array.sort` requires.
+ */
+function compareWithinBand(left: number, right: number): number {
+	// Epsilon keeps exact multiples (0.3 / 0.05 = 5.999…) in their own bucket.
+	return (
+		Math.floor(left / EVEN_BALANCING_USAGE_BAND + USAGE_RANKING_METRIC_EPSILON) -
+		Math.floor(right / EVEN_BALANCING_USAGE_BAND + USAGE_RANKING_METRIC_EPSILON)
+	);
+}
+
 function compareUsageRankedCandidatePriority(
 	left: UsageRankedCandidate<AuthCredential>,
 	right: UsageRankedCandidate<AuthCredential>,
 	planGated: boolean,
+	balancing: CredentialBalancing,
 ): number {
 	if (left.blocked !== right.blocked) return left.blocked ? 1 : -1;
 	if (left.blocked && right.blocked) {
@@ -121,6 +140,11 @@ function compareUsageRankedCandidatePriority(
 	const leftMeasured = left.usageMeasured;
 	const rightMeasured = right.usageMeasured;
 	if (leftMeasured !== rightMeasured) return leftMeasured ? -1 : 1;
+	if (balancing === "even") {
+		const secondary = compareWithinBand(left.secondaryUsed, right.secondaryUsed);
+		if (secondary !== 0) return secondary;
+		return compareWithinBand(left.primaryUsed, right.primaryUsed);
+	}
 	// Required drain, descending: the account whose remaining quota must
 	// burn fastest to avoid expiring unused at its reset comes first, so
 	// staggered resets land at ~100% utilization instead of stranding
@@ -140,17 +164,19 @@ function compareUsageRankedCandidates(
 	left: UsageRankedCandidate<AuthCredential>,
 	right: UsageRankedCandidate<AuthCredential>,
 	planGated: boolean,
+	balancing: CredentialBalancing,
 ): number {
-	const priority = compareUsageRankedCandidatePriority(left, right, planGated);
+	const priority = compareUsageRankedCandidatePriority(left, right, planGated, balancing);
 	return priority !== 0 ? priority : left.orderPos - right.orderPos;
 }
 
-/** Sort ranked candidates by blocks, plan, spent allowance, reserve, boost, hot window, usage and drain. */
+/** Sort ranked candidates by blocks, plan, spent allowance, reserve, boost, hot window, then usage band (`even`) or drain (`drain`). */
 export function orderUsageRankedCandidates<T extends AuthCredential>(
 	candidates: UsageRankedCandidate<T>[],
 	planGated: boolean,
+	balancing: CredentialBalancing = "drain",
 ): UsageCandidate<T>[] {
-	candidates.sort((left, right) => compareUsageRankedCandidates(left, right, planGated));
+	candidates.sort((left, right) => compareUsageRankedCandidates(left, right, planGated, balancing));
 	return candidates.map(candidate => ({
 		selection: candidate.selection,
 		usage: candidate.usage,

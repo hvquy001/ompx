@@ -2,6 +2,7 @@
  * `ompx auth-gateway` — run a forward proxy that injects local or broker auth.
  */
 
+import type { CredentialBalancing } from "@oh-my-pi/pi-ai";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
 import {
@@ -40,6 +41,11 @@ export default class AuthGateway extends Command {
 			description:
 				"Use local SQLite/env/config credentials even when an auth broker is configured (serve/status/check).",
 		}),
+		balance: Flags.string({
+			description:
+				"How new sessions spread across OAuth accounts (serve): `even` (default) keeps every account's usage level; `drain` chases the quota closest to resetting unused.",
+			options: ["even", "drain"],
+		}),
 		"trust-proxy-headers": Flags.boolean({
 			description: "Trust forwarded peer IP headers from a reverse proxy (serve); off by default.",
 		}),
@@ -60,6 +66,7 @@ export default class AuthGateway extends Command {
 		`# Force this machine's local credentials even when a broker is configured\n  ${APP_NAME} auth-gateway serve --local`,
 		`# Serve the same routes as JSON lines on stdin/stdout with your own credentials\n  echo '{"id":1,"path":"/v1/chat/completions","body":{"model":"@smol","messages":[{"role":"user","content":"hi"}]}}' | ${APP_NAME} auth-gateway stdio`,
 		`# Trust client IP headers from a trusted reverse proxy\n  ${APP_NAME} auth-gateway serve --trust-proxy-headers`,
+		`# Pin one request to a specific OAuth account (email, account id, or identity key)\n  curl -H "x-omp-account: alice@example.com" …`,
 		`# Print the gateway bearer token (creates one on first run)\n  ${APP_NAME} auth-gateway token`,
 		`# Rotate the gateway bearer token\n  ${APP_NAME} auth-gateway token --regenerate`,
 		`# Run on loopback without any bearer (anyone on this host can call)\n  ${APP_NAME} auth-gateway serve --no-auth`,
@@ -88,6 +95,7 @@ export default class AuthGateway extends Command {
 				local: flags.local,
 				daemon: flags.daemon,
 				verbose: flags.verbose,
+				balance: flags.balance as CredentialBalancing | undefined,
 				clients: flags.clients,
 			},
 		};

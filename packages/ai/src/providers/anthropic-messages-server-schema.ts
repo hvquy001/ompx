@@ -268,6 +268,8 @@ export const anthropicMessagesRequestSchema = type({
 	"context_management?": "unknown",
 	"mcp_servers?": "unknown",
 	"service_tier?": "unknown",
+	// Claude Code auto mode's server-side classifier review; forwarded verbatim.
+	"safeguards?": "unknown[]",
 });
 
 /**

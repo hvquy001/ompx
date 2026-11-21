@@ -64,6 +64,7 @@ import {
 	normalizeClientSessionKey,
 	recordGatewayUsage,
 	resolveGatewayAccount,
+	resolveGatewayAccountPin,
 	resolveGatewayApiKeyWithOrigin,
 } from "./dispatch";
 import {
@@ -220,6 +221,7 @@ function buildStreamOptions(parsed: ParsedFormatRequest, model: Model<Api>, sign
 	if (options.frequencyPenalty !== undefined && sampling) opts.frequencyPenalty = options.frequencyPenalty;
 	if (options.repetitionPenalty !== undefined && sampling) opts.repetitionPenalty = options.repetitionPenalty;
 	if (options.metadata !== undefined) opts.metadata = options.metadata;
+	if (options.safeguards !== undefined) opts.safeguards = options.safeguards;
 	if (options.userProfileId !== undefined) opts.userProfileId = options.userProfileId;
 	if (options.headers !== undefined) opts.headers = { ...opts.headers, ...options.headers };
 	if (options.toolChoice !== undefined) {
@@ -555,7 +557,15 @@ async function handleFormatEndpoint(
 	// expected to resolve the credential and pass it as `options.apiKey`.
 	// For OAuth providers this returns the access token (refreshed via the
 	// broker override on AuthStorage when needed).
-	const apiKeyResolution = await resolveGatewayApiKeyWithOrigin(bootOpts, model, sessionId, controller.signal, peer);
+	const oauthAccount = resolveGatewayAccountPin(req.headers);
+	const apiKeyResolution = await resolveGatewayApiKeyWithOrigin(
+		bootOpts,
+		model,
+		sessionId,
+		controller.signal,
+		peer,
+		oauthAccount,
+	);
 	if (controller.signal.aborted) return clientClosedResponse(route);
 	if ("status" in apiKeyResolution) {
 		return route.module.formatError(apiKeyResolution.status, apiKeyResolution.type, apiKeyResolution.message);
@@ -607,6 +617,7 @@ async function handleFormatEndpoint(
 			audit.credentialAuthType = credentialAuthTypeForResolution(model.provider, resolution);
 			lease.updateAccount(resolveGatewayAccount(resolution));
 		},
+		oauthAccount,
 	);
 
 	if (!parsed.stream) {
@@ -794,7 +805,15 @@ async function handlePiNative(
 	const sessionId = clientKey ?? deriveSessionId(parsed.modelId, parsed.context, toolsJson);
 	parsed.options.sessionId = sessionId;
 
-	const apiKeyResolution = await resolveGatewayApiKeyWithOrigin(bootOpts, model, sessionId, controller.signal, peer);
+	const oauthAccount = resolveGatewayAccountPin(req.headers);
+	const apiKeyResolution = await resolveGatewayApiKeyWithOrigin(
+		bootOpts,
+		model,
+		sessionId,
+		controller.signal,
+		peer,
+		oauthAccount,
+	);
 	if (controller.signal.aborted) return aborted();
 	if ("status" in apiKeyResolution) {
 		return noStoreErrorResponse(apiKeyResolution.status, apiKeyResolution.type, apiKeyResolution.message);
@@ -849,6 +868,7 @@ async function handlePiNative(
 			audit.credentialAuthType = credentialAuthTypeForResolution(model.provider, resolution);
 			lease.updateAccount(resolveGatewayAccount(resolution));
 		},
+		oauthAccount,
 	);
 	if (model.compat && "supportsSamplingParams" in model.compat && model.compat.supportsSamplingParams === false) {
 		delete streamOpts.temperature;

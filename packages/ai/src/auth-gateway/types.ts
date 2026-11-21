@@ -100,6 +100,8 @@ export interface AuthGatewayParsedRequestOptions {
 	 * free-form bag. The gateway forwards as-is.
 	 */
 	metadata?: Record<string, unknown>;
+	/** Anthropic `safeguards` (Claude Code auto-mode classifier review), verbatim. */
+	safeguards?: unknown[];
 	/** Anthropic User Profile attribution from the inbound request header. */
 	userProfileId?: string;
 	/**

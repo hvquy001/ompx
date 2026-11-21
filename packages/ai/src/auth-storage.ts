@@ -367,6 +367,7 @@ class LocalAuthStorageBackend implements AuthStorageBackend {
 			usage,
 			refresher,
 			strategies,
+			balancing: options.credentialBalancing ?? "drain",
 		});
 		const limits = new RateLimits({ store, pool, overrides, blocks, affinity, usage, strategies });
 		const keys = new KeyCascade({

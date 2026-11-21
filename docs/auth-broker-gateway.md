@@ -150,7 +150,7 @@ The CLI broker refresh hook also handles managed `mcp_oauth:*` credentials using
 ### CLI
 
 ```
-omp auth-gateway serve   [--bind=host:port] [--no-auth] [--trust-proxy-headers] [--clients=<file>]
+omp auth-gateway serve   [--bind=host:port] [--no-auth] [--balance=even|drain] [--trust-proxy-headers] [--clients=<file>]
 omp auth-gateway stdio
 omp auth-gateway token   [--regenerate] [--json]
 omp auth-gateway status  [--json]
@@ -158,6 +158,7 @@ omp auth-gateway check   [--strict] [--json]
 ```
 
 - `serve` requires `OMP_AUTH_BROKER_URL` (or `auth.broker.url` in `config.yml`) — the gateway is itself a broker client. It fetches a live snapshot, wraps it in `RemoteAuthCredentialStore`, and constructs `AuthStorage` with the configured account pool and account policies. Unlike normal client discovery, gateway startup does not use the encrypted snapshot cache. Default bind is `127.0.0.1:4000`. The gateway token is stored at `<config-dir>/auth-gateway.token` (`0600`); `--no-auth` disables the bearer check entirely. Use that flag only on trusted loopback listeners; it does not enforce a loopback bind.
+- `--balance` picks how new sessions spread across OAuth accounts. `even` (default) sends each new session to the least-used account, splitting accounts within 5 percentage points of each other by session hash, so every account's limit drains at a similar pace. `drain` chases the quota closest to resetting unused. Both modes skip blocked or exhausted accounts, demote accounts whose short window is nearly spent, and keep a session on its account while its prompt cache is warm.
 - Logs attribute requests to the socket peer address. Behind a trusted reverse proxy, pass `--trust-proxy-headers` to use `X-Forwarded-For` / `X-Real-IP` for authenticated requests; unauthorized requests are always logged with the socket peer. An authenticated request that also carries the gateway token, or its own client token, in its URL or in a forwarded, logged, or identity header is rejected with `400` before any credential lookup. Each `auth-gateway request` log line carries the broker `credentialId` the request started on, and `client` for a [client token](#client-tokens).
 - `token` manages the token file; `--regenerate` requires a running gateway to restart before accepting the replacement. `status` checks the local token file and an authenticated broker snapshot; it does not probe the gateway listener.
 - `check` constructs its own broker-backed store and probes the credentials the gateway would use, without calling a running gateway. Without `--strict` it uses provider usage probes. `--strict` additionally tries suitable bundled chat models and can consume quota; providers with no suitable candidate (including pi-native forwarding, Bedrock, Vertex, and Cursor transports) cannot be completion-probed.
@@ -244,6 +245,14 @@ Inference routes record observed usage against `x-omp-install-id`, `x-omp-hostna
 TypeSafe clients using the default base-URL resolver can set `TYPESAFE_BASE_URL=http://gateway:4000` with `TYPESAFE_API_KEY=<gateway token>`. omp's catalog-backed `judge` role passes the model's explicit `baseUrl`, which takes precedence over that environment fallback; configure the TypeSafe provider's `baseUrl` and `apiKey` in `models.yml` to use the gateway. OpenAI-SDK-style clients use `http://gateway:4000/v1`.
 
 There is no raw provider passthrough path. All supported routes go through `pi-ai` provider logic so credential-specific request shaping, OAuth refresh-on-auth-error, and provider quirks stay centralized.
+
+### Claude Code auto mode (server-side classifier review)
+
+Claude Code auto mode sends a `safeguards` request field paired with a `dangerous-tool-use-*` `anthropic-beta` value so Anthropic reviews risky tool calls for free. The gateway forwards both to the official Anthropic API, keeps the client's own dated `dangerous-tool-use-*` / `auto-mode-classifier-*` beta values, and returns the verdicts as `safeguard_results` on the final `message_delta` (streaming) or the message body (non-streaming), with tool-use IDs unchanged. Endpoints other than `api.anthropic.com` never receive the pair, because they reject it; Claude Code then falls back to its own billed classifier requests. See [auto mode classifier billing](https://code.claude.com/docs/en/auto-mode-classifier-billing).
+
+### Pinning an OAuth account
+
+Send `x-omp-account: <email | account id | identity key>` to route a request to one OAuth account, bypassing the balancer. The match is exact and case-insensitive. A pinned request never falls back to another account or an API key: an unknown or unusable account returns `401` (`No usable <provider> OAuth account matches x-omp-account "<value>"`), and a rate-limited one returns the provider's usage-limit error. The header is honored on every chat inference route (OpenAI Chat Completions, Anthropic Messages, OpenAI Responses, pi-native stream) and on every refresh or retry of that request.
 
 `idleTimeout` on the underlying `Bun.serve` is set to `255 s` so long thinking-budget calls do not get killed by Bun’s default idle timeout.
 

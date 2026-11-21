@@ -467,6 +467,7 @@ export function parseRequest(body: unknown, headers?: Headers): ParsedRequest {
 	if (data.metadata !== undefined) {
 		options.metadata = data.metadata as Record<string, unknown>;
 	}
+	if (data.safeguards !== undefined) options.safeguards = data.safeguards;
 	const cacheKey = resolvePromptCacheKey(body, headers);
 	if (cacheKey !== undefined) options.promptCacheKey = cacheKey;
 	// Allow-listed header capture, read back by `encodeStream` (the caller's
@@ -657,6 +658,7 @@ export function encodeResponse(message: AssistantMessage, requestedModelId: stri
 		// `null` for now (Anthropic schema allows it).
 		stop_sequence: null,
 		...(message.inputTransformations ? { input_transformations: message.inputTransformations } : {}),
+		...(message.safeguardResults ? { safeguard_results: message.safeguardResults } : {}),
 		usage: encodeUsage(message),
 	};
 }
@@ -970,6 +972,9 @@ export function encodeStream(
 										// `tool_use` either.
 										stop_reason: mapStopReasonOut(ev.reason, ev.message.content.some(isClientToolUse)),
 										stop_sequence: null,
+										...(ev.message.safeguardResults
+											? { safeguard_results: ev.message.safeguardResults }
+											: {}),
 									},
 									...(bindingControlsRequested
 										? { input_transformations: ev.message.inputTransformations ?? [] }

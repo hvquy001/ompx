@@ -47,6 +47,8 @@ const OPTION_TIERS = {
 	thinkingDisplay: "client",
 	anthropicCacheMessageBoundary: "client",
 	previousInteractionId: "client",
+	// Claude Code auto mode's classifier review: part of what is asked of the model, and the provider drops it off the official endpoint.
+	safeguards: "client",
 
 	// Attribution.
 	headers: "gateway",

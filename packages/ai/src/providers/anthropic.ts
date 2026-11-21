@@ -248,6 +248,11 @@ export { resolvesToOfficialAnthropicEndpoint, supportsAnthropicCompaction, suppo
  * (https://platform.claude.com/docs/en/build-with-claude/fallback-credit).
  */
 const FALLBACK_CREDIT_TTL_MS = 5 * 60 * 1000;
+/** Pairs with the `safeguards` request field (Claude Code auto-mode classifier review). */
+const dangerousToolUseBeta = "dangerous-tool-use-2026-09-03";
+const DANGEROUS_TOOL_USE_BETA_PREFIX = "dangerous-tool-use-";
+/** Claude Code auto-mode betas a gateway must pass through to the official API. */
+const CLAUDE_CODE_AUTO_MODE_BETA_PREFIXES = [DANGEROUS_TOOL_USE_BETA_PREFIX, "auto-mode-classifier-"] as const;
 
 /**
  * The two betas that only make sense alongside a `cache_control` breakpoint.
@@ -981,6 +986,12 @@ export interface AnthropicOptions extends StreamOptions {
 	 * response (a gateway opted in) is still persisted as a replay boundary.
 	 */
 	fallbacks?: FallbackParam[];
+	/**
+	 * Server-side safeguards (`safeguards` request field), forwarded verbatim
+	 * with their `dangerous-tool-use-*` beta to the official Anthropic API only.
+	 * Verdicts arrive on `AssistantMessage.safeguardResults`.
+	 */
+	safeguards?: unknown[];
 }
 
 export type AnthropicClientOptionsArgs = {
@@ -2188,6 +2199,11 @@ const streamAnthropicOnce = (
 					};
 				});
 			}
+			// Server-side safeguards (Claude Code auto mode's dangerous-tool-use
+			// classifier) exist only on the official API: other endpoints reject the
+			// field, and an injected client owns its own endpoint and beta set.
+			const forwardsSafeguards = !options?.client && isOfficialAnthropicApiUrl(baseUrl);
+			const safeguards = forwardsSafeguards && options?.safeguards?.length ? options.safeguards : undefined;
 
 			// Preserve the caller/token classification for pre-client header choices.
 			// The client builder then normalizes it for transports that must not use
@@ -2316,6 +2332,23 @@ const streamAnthropicOnce = (
 						extraBetas.push(fallbackCreditBeta);
 					}
 				}
+				// The safeguards field travels with its beta; keep the caller's version
+				// of it (and of the sibling classifier beta) when the client sent one,
+				// because the enforced OAuth header set would otherwise drop it.
+				if (forwardsSafeguards) {
+					const callerBetas = normalizeExtraBetas(getHeaderCaseInsensitive(mergedCallerHeaders, "anthropic-beta"));
+					for (const beta of callerBetas) {
+						if (
+							CLAUDE_CODE_AUTO_MODE_BETA_PREFIXES.some(prefix => beta.startsWith(prefix)) &&
+							!extraBetas.includes(beta)
+						) {
+							extraBetas.push(beta);
+						}
+					}
+					if (safeguards && !extraBetas.some(beta => beta.startsWith(DANGEROUS_TOOL_USE_BETA_PREFIX))) {
+						extraBetas.push(dangerousToolUseBeta);
+					}
+				}
 				// Server-side fallback beta chain: opt-in via `options.fallbacks`.
 				// Nested overrides (`speed`, `output_config.effort`,
 				// `output_config.task_budget`) reuse the same top-level betas
@@ -2417,6 +2450,7 @@ const streamAnthropicOnce = (
 					dropCacheControlOptions,
 					controlRecords: getControlRecords(),
 					fallbacks,
+					safeguards,
 					effectiveBaseUrl: baseUrl,
 				});
 				controlState = built.controlState;
@@ -3295,6 +3329,7 @@ const streamAnthropicOnce = (
 								continue;
 							}
 							const delta = event.delta;
+							if (Array.isArray(delta?.safeguard_results)) output.safeguardResults = delta.safeguard_results;
 							applyReportedInputTransformations(
 								output,
 								event.input_transformations,
@@ -5598,6 +5633,8 @@ type AnthropicParamBuildOptions = {
 	controlRecords?: readonly AnthropicControlRecord[];
 	/** Sanitized server-side fallback entries; defaults to `options?.fallbacks` when omitted. */
 	fallbacks?: AnthropicOptions["fallbacks"];
+	/** Safeguards cleared for this endpoint; omitted means none are sent. */
+	safeguards?: unknown[];
 	/**
 	 * Whether the endpoint this request reaches accepts server-side compaction
 	 * (see {@link supportsAnthropicCompaction}); false keeps the edit, the beta,
@@ -5709,6 +5746,7 @@ function buildParams(
 		dropCacheControlOptions = false,
 		controlRecords,
 		fallbacks = options?.fallbacks,
+		safeguards,
 		compactionSupported = supportsAnthropicCompaction(model),
 		forceThinkingOff,
 		effectiveBaseUrl,
@@ -6063,6 +6101,7 @@ function buildParams(
 		}),
 		...(outputConfig && { output_config: outputConfig }),
 		...(fallbacks?.length ? { fallbacks } : {}),
+		...(safeguards ? { safeguards } : {}),
 		...(vertexControlBetas.length > 0 ? { anthropic_beta: vertexControlBetas } : {}),
 		stream: true,
 	};

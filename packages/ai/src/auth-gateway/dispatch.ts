@@ -85,6 +85,15 @@ export function normalizeClientSessionKey(clientKey: string | undefined): string
 }
 
 /**
+ * The OAuth account a client pinned with `x-omp-account` (email, account id or
+ * identity key), or `undefined` to let the gateway balance across accounts.
+ * A blank header is absent.
+ */
+export function resolveGatewayAccountPin(headers: Headers): string | undefined {
+	return headers.get("x-omp-account")?.trim() || undefined;
+}
+
+/**
  * Stable identity of the account a request's credential belongs to.
  *
  * `markUsageLimitReached` and the auth-retry resolver switch a session to a
@@ -121,7 +130,9 @@ export function gatewayRequestLogFields(
  * Keep this selection snapshot intact even if another request replaces the
  * stored token before dispatch. Storage failures map through
  * {@link classifyGatewayError}; a provider without any credential is a 401
- * unless its catalog policy allows keyless requests.
+ * unless its catalog policy allows keyless requests. A pinned account
+ * (`oauthAccount`, see {@link resolveGatewayAccountPin}) is strict: no other
+ * account or key serves the request, and an unusable one is a 401 naming the pin.
  */
 export async function resolveGatewayApiKeyWithOrigin(
 	opts: AuthGatewayCredentialOptions,
@@ -129,6 +140,7 @@ export async function resolveGatewayApiKeyWithOrigin(
 	sessionId: string,
 	signal: AbortSignal,
 	peer: string,
+	oauthAccount?: string,
 ): Promise<AuthApiKeyResolution | GatewayErrorClassification> {
 	let resolution: AuthApiKeyResolution | undefined;
 	try {
@@ -140,7 +152,7 @@ export async function resolveGatewayApiKeyWithOrigin(
 			model.provider,
 			gatewayCredentialSessionId(opts, model, sessionId),
 			{
-				...modelKeyOptions(model, signal),
+				...modelKeyOptions(model, signal, oauthAccount),
 				preferOAuth: true,
 			},
 		);
@@ -151,13 +163,16 @@ export async function resolveGatewayApiKeyWithOrigin(
 	}
 	if (resolution) return resolution;
 	// A keyless provider (catalog `allowsMissingApiKey`) carries the sentinel; its origin is the catalog config.
-	if (getProviderDefinition(model.provider)?.allowsMissingApiKey) {
+	if (oauthAccount === undefined && getProviderDefinition(model.provider)?.allowsMissingApiKey) {
 		return { apiKey: NO_AUTH_SENTINEL, origin: { kind: "config" } };
 	}
 	return {
 		status: 401,
 		type: "authentication_error",
-		message: `No credential available for provider ${model.provider}`,
+		message:
+			oauthAccount === undefined
+				? `No credential available for provider ${model.provider}`
+				: `No usable ${model.provider} OAuth account matches x-omp-account "${oauthAccount}"`,
 	};
 }
 
@@ -180,6 +195,7 @@ async function refreshGatewayApiKeyAfterAuthError(
 	signal: AbortSignal,
 	format: string,
 	peer: string,
+	oauthAccount: string | undefined,
 ): Promise<AuthApiKeyResolution | undefined> {
 	const rotation = await storage.limits.rotate(provider, sessionId, {
 		error,
@@ -207,7 +223,7 @@ async function refreshGatewayApiKeyAfterAuthError(
 	const rotated: { resolution?: AuthApiKeyResolution } = {};
 	const resolveRotated = async (): Promise<AuthApiKeyResolution | undefined> => {
 		rotated.resolution = await storage.keys.withOrigin(provider, sessionId, {
-			...modelKeyOptions(model, signal),
+			...modelKeyOptions(model, signal, oauthAccount),
 			preferOAuth: !poolExhausted,
 		});
 		return rotated.resolution;
@@ -219,9 +235,17 @@ async function refreshGatewayApiKeyAfterAuthError(
 	return resolved.afterSiblingWait ? { ...rotated.resolution, afterSiblingWait: true } : rotated.resolution;
 }
 
-/** Model-scoped key options: usage ranking by model id, routing to accounts discovery saw serve it. */
-function modelKeyOptions(model: Model<Api>, signal: AbortSignal): AuthApiKeyOptions {
-	return { modelId: model.id, accountIds: model.accountAccess && Object.keys(model.accountAccess), signal };
+/**
+ * Request-scoped key options: usage ranking by model id, routing to accounts
+ * discovery saw serve it, and the client's `oauthAccount` pin when it sent one.
+ */
+function modelKeyOptions(model: Model<Api>, signal: AbortSignal, oauthAccount: string | undefined): AuthApiKeyOptions {
+	return {
+		modelId: model.id,
+		accountIds: model.accountAccess && Object.keys(model.accountAccess),
+		signal,
+		oauthAccount,
+	};
 }
 
 /**
@@ -243,7 +267,9 @@ function modelKeyOptions(model: Model<Api>, signal: AbortSignal): AuthApiKeyOpti
  * `opts.client` binds the provider, so refresh, blocking and sibling rotation
  * stay inside its accounts. `onResolution` observes every rotation; routes
  * that retain provider session state use it to re-key the account lease,
- * one-shot routes pass `undefined`.
+ * one-shot routes pass `undefined`. `oauthAccount` is the request's
+ * `x-omp-account` pin, carried into every refresh and rotation resolve so a
+ * retry never leaves the pinned account.
  */
 export function buildGatewayApiKeyResolver(
 	opts: AuthGatewayCredentialOptions,
@@ -254,6 +280,7 @@ export function buildGatewayApiKeyResolver(
 	format: string,
 	peer: string,
 	onResolution?: (resolution: AuthApiKeyResolution) => void,
+	oauthAccount?: string,
 ): ApiKeyResolver {
 	const { storage } = opts;
 	let lastResolution = initialResolution;
@@ -290,7 +317,7 @@ export function buildGatewayApiKeyResolver(
 				model.provider,
 				gatewayCredentialSessionId(opts, model, sessionId),
 				{
-					...modelKeyOptions(model, sig),
+					...modelKeyOptions(model, sig, oauthAccount),
 					forceRefresh: true,
 					preferOAuth: true,
 					refreshReason: AIError.status(error) === 401 ? "auth-recovery" : undefined,
@@ -309,6 +336,7 @@ export function buildGatewayApiKeyResolver(
 			sig,
 			format,
 			peer,
+			oauthAccount,
 		);
 		return select(next);
 	};

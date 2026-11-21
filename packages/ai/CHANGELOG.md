@@ -4,9 +4,11 @@
 
 ### Added
 
+- Added `credentialBalancing: "even"` to `AuthStorage` so new sessions spread across OAuth accounts by usage, and an `oauthAccount` key option that pins one account strictly
 - `buildAnthropicSearchHeaders` takes `extraBetas`, request-specific betas sent beside the web search beta ([#18125](https://github.com/can1357/oh-my-pi/pull/18125) by [@will-bogusz](https://github.com/will-bogusz))
 - Added `omitDemotedReasoning` to `StreamOptions`: an Anthropic request leaves out other models' reasoning that it would otherwise replay as text, and a refused request reports how many such blocks it carried in `demotedReasoningBlocks` ([#10407](https://github.com/can1357/oh-my-pi/issues/10407)) ([#17610](https://github.com/can1357/oh-my-pi/pull/17610) by [@will-bogusz](https://github.com/will-bogusz))
 - Added `riskAcknowledgement` to `OAuthPrompt`, set on the login-warning acceptance prompt so hosts that refuse input before the auth URL can still show it ([#19523](https://github.com/can1357/oh-my-pi/issues/19523))
+- Added Anthropic `safeguards` forwarding with its `dangerous-tool-use` beta and `safeguard_results` parsing, so Claude Code auto mode gets free server-side classifier review through the auth gateway
 
 ### Fixed
 

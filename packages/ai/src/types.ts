@@ -924,6 +924,13 @@ export interface SimpleStreamOptions extends Omit<StreamOptions, "apiKey"> {
 	 * provider. Non-Anthropic providers ignore the field.
 	 */
 	fallbacks?: FallbackParam[];
+	/**
+	 * Anthropic server-side safeguards (`safeguards` request field, e.g. Claude
+	 * Code auto mode's dangerous-tool-use classifier). Forwarded verbatim to the
+	 * official Anthropic API only; verdicts land on
+	 * {@link AssistantMessage.safeguardResults}. Other endpoints drop it.
+	 */
+	safeguards?: unknown[];
 	/** Factory Droid only: omit refusal fallbacks and reject responses served by another model. */
 	disableServerSideFallback?: boolean;
 }
@@ -1459,6 +1466,8 @@ export interface AssistantMessage {
 	disabledFeatures?: string[];
 	/** Provider-reported input rewrites such as dropped bound-thinking blocks. */
 	inputTransformations?: ProviderInputTransformation[];
+	/** Anthropic `safeguard_results` verdicts, verbatim wire shape (keyed by tool_use id). */
+	safeguardResults?: unknown[];
 	/**
 	 * Controls an Anthropic request declared, recorded on its response so later
 	 * requests over the same transcript replay a byte-identical prefix.

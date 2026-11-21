@@ -408,7 +408,19 @@ export type AuthStorageOptions = {
 	 * - `"broker http://omp.internal:8765"`
 	 */
 	sourceLabel?: string;
+	/**
+	 * How new sessions pick among usable OAuth/API-key accounts that report usage.
+	 * - `"drain"` (default): chase the quota closest to expiring unused.
+	 * - `"even"`: prefer the least-used account so every account's limit is
+	 *   consumed at a similar pace; near-equal accounts split by session hash.
+	 * Blocked, exhausted and hot (nearly exhausted short-window) accounts are
+	 * demoted the same way in both modes, and warm session stickiness is kept.
+	 */
+	credentialBalancing?: CredentialBalancing;
 };
+
+/** Account-balancing mode of {@link AuthStorageOptions.credentialBalancing}. */
+export type CredentialBalancing = "drain" | "even";
 
 /**
  * Outcome of {@link AuthStorage.limits.markReached}.
@@ -538,6 +550,13 @@ export type AuthApiKeyOptions = {
 	rejectedAccessToken?: string;
 	/** When false, select as `sessionId` would without recording the choice as that session's sticky credential. */
 	recordAffinity?: boolean;
+	/**
+	 * Restrict OAuth resolution to the one account matching this email, account
+	 * id or identity key (exact, case-insensitive). Strict: no sibling account,
+	 * runtime/config/env key or API key is used instead, so `undefined` means that
+	 * account is unknown or unusable.
+	 */
+	oauthAccount?: string;
 };
 
 /**
