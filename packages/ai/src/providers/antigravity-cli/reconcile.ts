@@ -86,29 +86,30 @@ export function transcriptDigest(messages: readonly Message[]): string {
 }
 
 /**
- * Safe char budget for a single `<conversation-checkpoint>` replay prompt.
- * agy truncates oversized single prompts around ~150K tokens from the tail, which
- * silently drops recent turns and causes amnesia loops. Staying under 240K chars
- * keeps even dense non-ASCII transcripts + system prompt safely below that ceiling.
+ * Safe UTF-8 byte budget for a single `<conversation-checkpoint>` replay prompt.
+ * agy silently truncates oversized single prompts from the tail (observed on >224K
+ * Vietnamese chars / ~312KB UTF-8, while 150KB passed intact), dropping recent turns
+ * and causing amnesia loops. Staying under 120KB UTF-8 keeps both ASCII and multi-byte
+ * Vietnamese transcripts safely below that ceiling with room for trailing user input.
  */
-export const REPLAY_MAX_CHARS = 240_000;
-const IMAGE_CHAR_WEIGHT = 4_000;
+export const REPLAY_MAX_BYTES = 120_000;
+const IMAGE_BYTE_WEIGHT = 4_000;
 
 /** Replay earlier turns as labelled text and image blocks, keeping the newest tail within budget, then send trailing input directly. */
-export function replayPrompt(replay: readonly Message[], maxChars = REPLAY_MAX_CHARS): ContentBlock[] {
+export function replayPrompt(replay: readonly Message[], maxBytes = REPLAY_MAX_BYTES): ContentBlock[] {
 	let split = replay.length;
 	while (split > 0 && isInputMessage(replay[split - 1]!)) split--;
 	const blocks: ContentBlock[] = [];
 	if (split > 0) {
 		const history = replay.slice(0, split);
 		const kept: ContentBlock[][] = [];
-		let usedChars = 0;
+		let usedBytes = 0;
 		for (let index = history.length - 1; index >= 0; index--) {
 			const rendered = renderCheckpointMessage(history[index]!);
 			const size = blocksWeight(rendered);
-			if (kept.length > 0 && usedChars + size > maxChars) break;
-			kept.push(kept.length === 0 && size > maxChars ? trimBlocksTail(rendered, maxChars) : rendered);
-			usedChars += Math.min(size, maxChars);
+			if (kept.length > 0 && usedBytes + size > maxBytes) break;
+			kept.push(kept.length === 0 && size > maxBytes ? trimBlocksTail(rendered, maxBytes) : rendered);
+			usedBytes += Math.min(size, maxBytes);
 		}
 		kept.reverse();
 		const omitted = history.length - kept.length;
@@ -164,31 +165,34 @@ function renderCheckpointMessage(message: Message): ContentBlock[] {
 function blocksWeight(blocks: readonly ContentBlock[]): number {
 	let total = 0;
 	for (const block of blocks) {
-		total += block.type === "text" ? block.text.length : IMAGE_CHAR_WEIGHT;
+		total += block.type === "text" ? Buffer.byteLength(block.text, "utf8") : IMAGE_BYTE_WEIGHT;
 	}
 	return total;
 }
 
-function trimBlocksTail(blocks: readonly ContentBlock[], maxChars: number): ContentBlock[] {
+function trimBlocksTail(blocks: readonly ContentBlock[], maxBytes: number): ContentBlock[] {
 	if (blocks.length <= 2) return [...blocks];
 	const open = blocks[0]!;
 	const close = blocks[blocks.length - 1]!;
-	let remaining = Math.max(0, maxChars - blocksWeight([open, close]));
+	let remaining = Math.max(0, maxBytes - blocksWeight([open, close]));
 	const middle: ContentBlock[] = [];
 	for (let index = blocks.length - 2; index >= 1 && remaining > 0; index--) {
 		const block = blocks[index]!;
 		if (block.type !== "text") {
-			if (remaining >= IMAGE_CHAR_WEIGHT) {
+			if (remaining >= IMAGE_BYTE_WEIGHT) {
 				middle.push(block);
-				remaining -= IMAGE_CHAR_WEIGHT;
+				remaining -= IMAGE_BYTE_WEIGHT;
 			}
 			continue;
 		}
-		if (block.text.length <= remaining) {
+		const byteLen = Buffer.byteLength(block.text, "utf8");
+		if (byteLen <= remaining) {
 			middle.push(block);
-			remaining -= block.text.length;
+			remaining -= byteLen;
 		} else {
-			middle.push({ type: "text", text: `...[truncated]...\n${block.text.slice(-remaining)}` });
+			const buf = Buffer.from(block.text, "utf8");
+			const sliced = buf.subarray(Math.max(0, buf.length - remaining)).toString("utf8");
+			middle.push({ type: "text", text: `...[truncated]...\n${sliced}` });
 			remaining = 0;
 		}
 	}
