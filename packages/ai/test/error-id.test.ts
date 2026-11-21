@@ -309,6 +309,16 @@ describe("error-id classification", () => {
 		expect(AIError.is(AIError.classifyMessage(oversized), AIError.Flag.AccountPolicy)).toBe(false);
 	});
 
+	it("treats agy's unknown-model rejection as a denial of only that model on this Antigravity account", () => {
+		const denial = new Error("Antigravity CLI request failed: Unknown model ID: gemini-4-neon");
+		expect(AIError.isModelEntitlementDenial(denial, "antigravity-cli", "gemini-4-neon")).toBe(true);
+		const suffixed = new Error("Unknown model ID: gemini-4-neon-high");
+		expect(AIError.isModelEntitlementDenial(suffixed, "antigravity-cli", "gemini-4-neon")).toBe(true);
+		expect(AIError.isModelEntitlementDenial(denial, "antigravity-cli", "gemini-3.8-flash")).toBe(false);
+		expect(AIError.isMismatchedModelEntitlementDenial(denial, "antigravity-cli", "gemini-3.8-flash")).toBe(true);
+		expect(AIError.isModelEntitlementDenial(denial, "google-gemini-cli", "gemini-4-neon")).toBe(false);
+	});
+
 	it("classifies Anthropic permission and oauth organization policy denials as account policy without content blocked", () => {
 		const errorMessage =
 			'403 {"type":"error","error":{"type":"permission_error","message":"OAuth authentication is currently not allowed for this organization.","details":{"error_code":"oauth_not_allowed_for_organization"}},"request_id":"req_011CfDQosvzzsyor4jWjLsz8"}';

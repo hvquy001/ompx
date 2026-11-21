@@ -991,6 +991,32 @@ function isAnthropicModelNotFoundError(error: unknown, provider: string, modelId
 	);
 }
 
+const AGY_UNKNOWN_MODEL_PATTERN = /\bUnknown model ID: ([\w.-]+)/;
+
+/** Model id from agy's "Unknown model ID" rejection: the signed-in account's roster lacks the model. */
+function agyUnknownModelId(error: unknown, depth = 0): string | undefined {
+	if (depth > 6) return undefined;
+	if (typeof error === "string") return AGY_UNKNOWN_MODEL_PATTERN.exec(error)?.[1];
+	if (!error || typeof error !== "object") return undefined;
+	for (const key of ["errorMessage", "message"] as const) {
+		const text = key in error ? (error as Record<string, unknown>)[key] : undefined;
+		const match = typeof text === "string" ? AGY_UNKNOWN_MODEL_PATTERN.exec(text)?.[1] : undefined;
+		if (match !== undefined) return match;
+	}
+	return "cause" in error ? agyUnknownModelId(error.cause, depth + 1) : undefined;
+}
+
+/**
+ * Whether agy rejected this request's model for the signed-in account. Accounts
+ * on different plans advertise different rosters, and agy may name the bare id
+ * or its effort-suffixed value (`gemini-4-neon-high`).
+ */
+function isAgyUnknownModelError(error: unknown, provider: string, modelId: string | undefined): boolean {
+	if (provider !== "antigravity-cli" || !modelId) return false;
+	const denied = agyUnknownModelId(error);
+	return denied !== undefined && (denied === modelId || denied.startsWith(`${modelId}-`));
+}
+
 /** Whether Cursor returned a non-retryable plan entitlement denial for this account. */
 function isCursorPlanAccountPolicyError(error: unknown, provider: string, depth = 0): boolean {
 	if (provider !== "cursor" || depth > 6) return false;
@@ -1010,14 +1036,16 @@ function isCursorPlanAccountPolicyError(error: unknown, provider: string, depth 
 /**
  * Flags for a rejection that denies this credential only the requested model
  * (Codex ChatGPT-account entitlement, Cursor plan, Anthropic model-not-found
- * 404), or 0. A denial that names a model must match `provider` and the
+ * 404, Antigravity CLI unknown model), or 0. A denial that names a model must match `provider` and the
  * requested `modelId`, so provider-controlled text cannot block another model.
  */
 export function modelEntitlementDenialKinds(error: unknown, provider: string, modelId: string | undefined): number {
 	if (isCodexChatGPTAccountPolicyError(error, provider, modelId) || isCursorPlanAccountPolicyError(error, provider)) {
 		return Flag.AccountPolicy | Flag.ContentBlocked;
 	}
-	return isAnthropicModelNotFoundError(error, provider, modelId) ? Flag.AccountPolicy : 0;
+	return isAnthropicModelNotFoundError(error, provider, modelId) || isAgyUnknownModelError(error, provider, modelId)
+		? Flag.AccountPolicy
+		: 0;
 }
 
 /** Whether a rejection denies this credential only the requested model; see {@link modelEntitlementDenialKinds}. */
@@ -1035,7 +1063,9 @@ export function isMismatchedModelEntitlementDenial(
 	modelId: string | undefined,
 ): boolean {
 	const namesModel =
-		codexChatGPTAccountPolicyModel(error) !== undefined || anthropicModelNotFoundId(error) !== undefined;
+		codexChatGPTAccountPolicyModel(error) !== undefined ||
+		anthropicModelNotFoundId(error) !== undefined ||
+		agyUnknownModelId(error) !== undefined;
 	return namesModel && !isModelEntitlementDenial(error, provider, modelId);
 }
 

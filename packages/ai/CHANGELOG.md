@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Antigravity CLI: when the signed-in account's plan does not offer the selected model ("Unknown model ID"), ompx now switches to another account that has it instead of falling back to a different model
 - Antigravity CLI: an account that hits its quota ("Individual quota reached … Resets in …") now fails the turn so ompx switches to another signed-in account instead of showing the notice as the answer
 - Antigravity CLI `/login` now offers the short `/launch` link and, when Tailscale is up, a tailnet link, so the long Google sign-in URL no longer has to be copied from a narrow or remote terminal
 - Antigravity CLI backend errors (`⚠ API error (attempt N): RESOURCE_EXHAUSTED …`, `⚠ INVALID_ARGUMENT (code 400) …`) now fail the request so the session can retry, switch account, or fall back, instead of streaming the notice as the model's answer
