@@ -19,7 +19,9 @@ import type { McpToolOutput } from "@oh-my-pi/pi-ai/providers/antigravity-cli/mc
 import { StepWriter } from "@oh-my-pi/pi-ai/providers/antigravity-cli/step-writer";
 import type { AssistantMessage, Context, Message, Tool, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error/rate-limit";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { extractRetryHint } from "@oh-my-pi/pi-utils";
 import type { ContentBlock, PromptRequest, PromptResponse, SessionConfigOption } from "@oh-my-pi/pi-utils/acp";
 
 const model = buildModel({
@@ -291,6 +293,21 @@ describe("AgyHost stateful steps", () => {
 		await expect(run.done).rejects.toThrow("RESOURCE_EXHAUSTED (code 429)");
 		expect(run.writer.output.content.some(block => block.type === "text" && block.text.length > 0)).toBe(false);
 		expect(fake.closed).toBe(true);
+	});
+	it("fails the step on agy's account quota notice so the account can rotate", async () => {
+		const state = await fixture();
+		const run = step(state.host, [user("hello")]);
+		const fake = await state.started.next();
+		await fake.prompts.next();
+		fake.text("\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 2h10m18s.\n");
+		const error = await run.done.then(
+			() => undefined,
+			(err: unknown) => err,
+		);
+		const message = error instanceof Error ? error.message : "";
+		expect(isUsageLimitOutcome(undefined, message)).toBe(true);
+		expect(extractRetryHint(null, message)).toBe((2 * 3600 + 10 * 60 + 18) * 1000);
+		expect(run.writer.output.content.some(block => block.type === "text" && block.text.length > 0)).toBe(false);
 	});
 	it("fails the step on agy's request-rejection notice", async () => {
 		const state = await fixture();

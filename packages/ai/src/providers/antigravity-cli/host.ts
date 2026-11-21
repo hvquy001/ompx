@@ -48,10 +48,11 @@ const CANCEL_TIMEOUT_MS = 5_000;
 const MCP_TOOL_NAME = /\bmcp_ide-tools_(\S+)/;
 /**
  * agy reports backend failures as assistant text (`⚠ API error (attempt N): RESOURCE_EXHAUSTED (code 429): …`,
- * `⚠ INVALID_ARGUMENT (code 400): …`). Such a status line is a provider failure, not model output: surface it so
+ * `⚠ INVALID_ARGUMENT (code 400): …`, `⚠ Individual quota reached. … Resets in 2h10m18s.`). Such a status line is a provider failure, not model output: surface it so
  * the session can retry, rotate the account, or fall back instead of showing it as the answer.
  */
-const AGY_ERROR_NOTICE = /^\s*⚠ (?:API error \(attempt \d+\):\s*)?([A-Z][A-Z_]+ \(code \d{3}\):[^\n]*)/;
+const AGY_ERROR_NOTICE =
+	/^\s*⚠ (?:API error \(attempt \d+\):\s*)?([A-Z][A-Z_]+ \(code \d{3}\):[^\n]*|[A-Z][^\n]*\bquota reached\b[^\n]*)/;
 
 /** Per-step request settings. */
 export interface AgyStepOptions {
