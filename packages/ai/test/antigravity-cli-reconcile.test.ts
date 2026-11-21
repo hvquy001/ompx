@@ -247,4 +247,23 @@ describe("replayPrompt", () => {
 		expect(text).toContain('id="call-1"');
 		expect(blocks.at(-1)).toEqual({ type: "text", text: "what did it say?" });
 	});
+	it("omits oldest checkpoint messages when replay exceeds budget so recent context and trailing input survive", () => {
+		const blocks = replayPrompt(
+			[
+				user("OLDEST-TASK-" + "x".repeat(200)),
+				assistant("old reply " + "y".repeat(200)),
+				user("RECENT-TASK"),
+				assistant("recent reply", ["call-9"]),
+				toolResult("call-9", "RECENT-RESULT"),
+				user("LATEST-USER-PROMPT"),
+			],
+			250,
+		);
+
+		const text = blocks.flatMap(block => (block.type === "text" ? [block.text] : [])).join("\n");
+		expect(text).not.toContain("OLDEST-TASK");
+		expect(text).toContain("omitted to stay within Antigravity's single-prompt limit");
+		expect(text).toContain("RECENT-RESULT");
+		expect(blocks.at(-1)).toEqual({ type: "text", text: "LATEST-USER-PROMPT" });
+	});
 });

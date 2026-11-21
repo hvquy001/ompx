@@ -85,49 +85,115 @@ export function transcriptDigest(messages: readonly Message[]): string {
 	return hash.digest("hex");
 }
 
-/** Replay earlier turns as labelled text and image blocks, then send trailing input directly. */
-export function replayPrompt(replay: readonly Message[]): ContentBlock[] {
+/**
+ * Safe char budget for a single `<conversation-checkpoint>` replay prompt.
+ * agy truncates oversized single prompts around ~150K tokens from the tail, which
+ * silently drops recent turns and causes amnesia loops. Staying under 240K chars
+ * keeps even dense non-ASCII transcripts + system prompt safely below that ceiling.
+ */
+export const REPLAY_MAX_CHARS = 240_000;
+const IMAGE_CHAR_WEIGHT = 4_000;
+
+/** Replay earlier turns as labelled text and image blocks, keeping the newest tail within budget, then send trailing input directly. */
+export function replayPrompt(replay: readonly Message[], maxChars = REPLAY_MAX_CHARS): ContentBlock[] {
 	let split = replay.length;
 	while (split > 0 && isInputMessage(replay[split - 1]!)) split--;
 	const blocks: ContentBlock[] = [];
 	if (split > 0) {
-		blocks.push({ type: "text", text: prompt.render(transcriptTemplate, {}) });
-		for (const message of replay.slice(0, split)) {
-			const tag = message.role === "toolResult" ? "tool_result" : message.role;
-			const attrs =
-				message.role === "toolResult"
-					? ` id=${JSON.stringify(message.toolCallId)} name=${JSON.stringify(message.toolName)} error=${message.isError}`
-					: "";
-			blocks.push({ type: "text", text: `<${tag}${attrs}>` });
-			if (typeof message.content === "string") blocks.push({ type: "text", text: message.content });
-			else
-				for (const part of message.content) {
-					switch (part.type) {
-						case "text":
-							blocks.push({ type: "text", text: part.text });
-							break;
-						case "image":
-							blocks.push({ type: "image", data: part.data, mimeType: part.mimeType });
-							break;
-						case "thinking":
-							blocks.push({ type: "text", text: `<thinking>${part.thinking}</thinking>` });
-							break;
-						case "toolCall":
-							blocks.push({
-								type: "text",
-								text: `<tool_call id=${JSON.stringify(part.id)} name=${JSON.stringify(part.name)}>${stableStringifyJson(part.arguments)}</tool_call>`,
-							});
-							break;
-					}
-				}
-			blocks.push({ type: "text", text: `</${tag}>` });
+		const history = replay.slice(0, split);
+		const kept: ContentBlock[][] = [];
+		let usedChars = 0;
+		for (let index = history.length - 1; index >= 0; index--) {
+			const rendered = renderCheckpointMessage(history[index]!);
+			const size = blocksWeight(rendered);
+			if (kept.length > 0 && usedChars + size > maxChars) break;
+			kept.push(kept.length === 0 && size > maxChars ? trimBlocksTail(rendered, maxChars) : rendered);
+			usedChars += Math.min(size, maxChars);
 		}
+		kept.reverse();
+		const omitted = history.length - kept.length;
+		blocks.push({ type: "text", text: prompt.render(transcriptTemplate, {}) });
+		if (omitted > 0) {
+			blocks.push({
+				type: "text",
+				text: `[${omitted} earlier message${omitted === 1 ? "" : "s"} omitted to stay within Antigravity's single-prompt limit; showing the ${kept.length} most recent.]`,
+			});
+		}
+		for (const messageBlocks of kept) blocks.push(...messageBlocks);
 		blocks.push({ type: "text", text: "</conversation-checkpoint>" });
 	}
 	for (const message of replay.slice(split)) {
 		if (isInputMessage(message)) blocks.push(...inputBlocks(message));
 	}
 	return blocks;
+}
+
+function renderCheckpointMessage(message: Message): ContentBlock[] {
+	const blocks: ContentBlock[] = [];
+	const tag = message.role === "toolResult" ? "tool_result" : message.role;
+	const attrs =
+		message.role === "toolResult"
+			? ` id=${JSON.stringify(message.toolCallId)} name=${JSON.stringify(message.toolName)} error=${message.isError}`
+			: "";
+	blocks.push({ type: "text", text: `<${tag}${attrs}>` });
+	if (typeof message.content === "string") blocks.push({ type: "text", text: message.content });
+	else
+		for (const part of message.content) {
+			switch (part.type) {
+				case "text":
+					blocks.push({ type: "text", text: part.text });
+					break;
+				case "image":
+					blocks.push({ type: "image", data: part.data, mimeType: part.mimeType });
+					break;
+				case "thinking":
+					blocks.push({ type: "text", text: `<thinking>${part.thinking}</thinking>` });
+					break;
+				case "toolCall":
+					blocks.push({
+						type: "text",
+						text: `<tool_call id=${JSON.stringify(part.id)} name=${JSON.stringify(part.name)}>${stableStringifyJson(part.arguments)}</tool_call>`,
+					});
+					break;
+			}
+		}
+	blocks.push({ type: "text", text: `</${tag}>` });
+	return blocks;
+}
+
+function blocksWeight(blocks: readonly ContentBlock[]): number {
+	let total = 0;
+	for (const block of blocks) {
+		total += block.type === "text" ? block.text.length : IMAGE_CHAR_WEIGHT;
+	}
+	return total;
+}
+
+function trimBlocksTail(blocks: readonly ContentBlock[], maxChars: number): ContentBlock[] {
+	if (blocks.length <= 2) return [...blocks];
+	const open = blocks[0]!;
+	const close = blocks[blocks.length - 1]!;
+	let remaining = Math.max(0, maxChars - blocksWeight([open, close]));
+	const middle: ContentBlock[] = [];
+	for (let index = blocks.length - 2; index >= 1 && remaining > 0; index--) {
+		const block = blocks[index]!;
+		if (block.type !== "text") {
+			if (remaining >= IMAGE_CHAR_WEIGHT) {
+				middle.push(block);
+				remaining -= IMAGE_CHAR_WEIGHT;
+			}
+			continue;
+		}
+		if (block.text.length <= remaining) {
+			middle.push(block);
+			remaining -= block.text.length;
+		} else {
+			middle.push({ type: "text", text: `...[truncated]...\n${block.text.slice(-remaining)}` });
+			remaining = 0;
+		}
+	}
+	middle.reverse();
+	return [open, ...middle, close];
 }
 
 /** Supply the actual delayed result only after agy's old prompt has confirmed cancellation. */

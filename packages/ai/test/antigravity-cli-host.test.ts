@@ -20,6 +20,7 @@ import { StepWriter } from "@oh-my-pi/pi-ai/providers/antigravity-cli/step-write
 import type { AssistantMessage, Context, Message, Tool, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error/rate-limit";
+import { isAccountPolicyError } from "@oh-my-pi/pi-ai/error/flags";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { extractRetryHint } from "@oh-my-pi/pi-utils";
 import type { ContentBlock, PromptRequest, PromptResponse, SessionConfigOption } from "@oh-my-pi/pi-utils/acp";
@@ -309,6 +310,20 @@ describe("AgyHost stateful steps", () => {
 		const message = error instanceof Error ? error.message : "";
 		expect(isUsageLimitOutcome(undefined, message)).toBe(true);
 		expect(extractRetryHint(null, message)).toBe((2 * 3600 + 10 * 60 + 18) * 1000);
+		expect(run.writer.output.content.some(block => block.type === "text" && block.text.length > 0)).toBe(false);
+	});
+	it("fails the step on agy's Verification Required notice as an account policy error", async () => {
+		const state = await fixture();
+		const run = step(state.host, [user("hello")]);
+		const fake = await state.started.next();
+		await fake.prompts.next();
+		fake.text(" ⚠ Verification Required ");
+		const error = await run.done.then(
+			() => undefined,
+			(err: unknown) => err,
+		);
+		expect(error).toBeInstanceOf(Error);
+		expect(isAccountPolicyError(error)).toBe(true);
 		expect(run.writer.output.content.some(block => block.type === "text" && block.text.length > 0)).toBe(false);
 	});
 	it("fails the step on agy's request-rejection notice", async () => {

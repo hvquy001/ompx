@@ -1,7 +1,7 @@
 /** WAL-safe agy conversation checkpoints and copy-on-rewind forks. */
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { appendFileSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isRecord } from "@oh-my-pi/pi-utils";
@@ -14,6 +14,24 @@ const DIGEST = /^[0-9a-f]{64}$/;
 export function conversationStorePath(geminiDir: string, id: string): string {
 	if (!UUID.test(id)) throw new Error("Invalid Antigravity CLI conversation id");
 	return path.join(geminiDir, "antigravity-cli", "conversations", `${id}.db`);
+}
+
+/** Locate a conversation store in this account's dir or a sibling account's dir (for rotation/resume). */
+function findConversationStore(geminiDir: string, id: string): string {
+	const local = conversationStorePath(geminiDir, id);
+	if (existsSync(local)) return local;
+	const parent = path.dirname(geminiDir);
+	const self = path.basename(geminiDir);
+	try {
+		for (const entry of readdirSync(parent, { withFileTypes: true })) {
+			if (!entry.isDirectory() || entry.name === self) continue;
+			const candidate = conversationStorePath(path.join(parent, entry.name), id);
+			if (existsSync(candidate)) return candidate;
+		}
+	} catch {
+		// Parent directory unreadable; fall through to local path so caller gets normal ENOENT.
+	}
+	return local;
 }
 
 /** Read and record a nonempty turn-end checkpoint bound to this exact transcript digest. */
@@ -49,13 +67,14 @@ export function forkConversation(
 	digest: string,
 ): string {
 	assertCheckpoint(checkpoint);
-	const store = conversationStorePath(geminiDir, sourceId);
+	const store = findConversationStore(geminiDir, sourceId);
 	const fingerprint = recordedFingerprint(store, checkpoint, digest);
 	if (!DIGEST.test(digest) || !fingerprint) {
 		throw new Error("Antigravity CLI checkpoint was not recorded for this transcript");
 	}
 	const forkId = crypto.randomUUID();
 	const target = conversationStorePath(geminiDir, forkId);
+	mkdirSync(path.dirname(target), { recursive: true });
 	try {
 		const source = new Database(store, { readonly: true, create: false });
 		try {

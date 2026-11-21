@@ -694,6 +694,9 @@ function classifyText(
 		if (isAnthropicAccountPolicyText(errorMessage, provider, statusClean)) {
 			kinds |= Flag.AccountPolicy;
 		}
+		if (/Antigravity CLI request failed:\s*Verification Required\b/i.test(errorMessage)) {
+			kinds |= Flag.AccountPolicy;
+		}
 		if (isAuthFailureText(errorMessage)) kinds |= Flag.AuthFailed;
 		const cleanMessage = errorMessage;
 		const isOpaque = isOpaqueStatusBody(cleanMessage);

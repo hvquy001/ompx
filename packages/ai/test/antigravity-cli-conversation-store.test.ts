@@ -117,4 +117,15 @@ describe("agy conversation checkpoints", () => {
 		state.db.run("UPDATE trajectory_meta SET cascade_id = ?", [crypto.randomUUID()]);
 		expect(() => readConversationCheckpoint(state.dir, state.id, digest)).toThrow("identity mismatch");
 	});
+
+	it("forks a recorded checkpoint from a sibling account directory on account rotation or resume", async () => {
+		const source = await store();
+		const checkpoint = readConversationCheckpoint(source.dir, source.id, digest);
+		const targetAccountDir = path.join(path.dirname(source.dir), "sibling-account");
+		const forkId = forkConversation(targetAccountDir, source.id, checkpoint, digest);
+		const forkedPath = conversationStorePath(targetAccountDir, forkId);
+		expect(existsSync(forkedPath)).toBe(true);
+		expect(existsSync(`${forkedPath}.checkpoints`)).toBe(true);
+		await rm(targetAccountDir, { recursive: true, force: true });
+	});
 });
