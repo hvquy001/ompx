@@ -72,7 +72,10 @@ export function planTurn(messages: readonly Message[], ledger: Ledger | undefine
 	return { kind: "fresh", replay: [...messages] };
 }
 
-/** Fingerprint model-visible ordered content, excluding timestamps, usage and presentation metadata. */
+/**
+ * Fingerprint model-visible ordered content, excluding timestamps, usage and presentation metadata.
+ * agy's own replies count only by their tool-call ids.
+ */
 export function transcriptDigest(messages: readonly Message[]): string {
 	const hash = createHash("sha256");
 	for (const message of messages) {
@@ -163,6 +166,14 @@ function contentBlocks(content: string | readonly (TextContent | ImageContent)[]
 }
 
 function messageContent(message: Message): unknown {
+	// agy keeps its own copy of what it wrote, and hosts may rewrite that text before
+	// sending it back (secret obfuscation, redaction). Its tool-call ids still pin the turn.
+	if (message.role === "assistant" && message.api === "antigravity-acp") {
+		return {
+			role: message.role,
+			toolCalls: message.content.flatMap(part => (part.type === "toolCall" ? [part.id] : [])),
+		};
+	}
 	const content =
 		typeof message.content === "string"
 			? [{ type: "text", text: message.content }]

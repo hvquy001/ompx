@@ -129,22 +129,53 @@ describe("planTurn", () => {
 
 describe("transcriptDigest", () => {
 	it("includes assistant text, tool names, arguments, ordered ids and actual result content", () => {
-		const original = [user("read"), assistant("reading", ["a", "b"]), toolResult("a", "original")];
+		const foreign = (text: string, ids: string[]): AssistantMessage => ({
+			...assistant(text, ids),
+			api: "anthropic-messages",
+			provider: "anthropic",
+		});
+		const original = [user("read"), foreign("reading", ["a", "b"]), toolResult("a", "original")];
 		const digest = transcriptDigest(original);
 		const variants: Message[][] = [
 			[user("edited"), original[1]!, original[2]!],
-			[original[0]!, assistant("edited", ["a", "b"]), original[2]!],
-			[original[0]!, assistant("reading", ["b", "a"]), original[2]!],
+			[original[0]!, foreign("edited", ["a", "b"]), original[2]!],
+			[original[0]!, foreign("reading", ["b", "a"]), original[2]!],
 			[original[0]!, original[1]!, toolResult("a", "edited")],
 			[original[0]!, original[1]!, { ...toolResult("a", "original"), isError: true }],
 			[original[0]!, original[1]!, { ...toolResult("a", "original"), toolName: "write" }],
 		];
-		const changedCall = assistant("reading", ["a", "b"]);
+		const changedCall = foreign("reading", ["a", "b"]);
 		const call = changedCall.content[1];
 		if (call?.type !== "toolCall") throw new Error("Missing test tool call");
 		call.arguments = { path: "different" };
 		variants.push([original[0]!, changedCall, original[2]!]);
 		for (const variant of variants) expect(transcriptDigest(variant)).not.toBe(digest);
+	});
+
+	it("keeps resuming agy's turn when the host rewrites agy's own reply text", () => {
+		const reply = assistant("the import is provided by the form", ["call-1"]);
+		const thinking = { type: "thinking" as const, thinking: "the provided data" };
+		reply.content.unshift(thinking);
+		const seen = [user("fix import"), reply];
+		const rewritten: AssistantMessage = {
+			...reply,
+			content: reply.content.map(part =>
+				part.type === "text"
+					? { ...part, text: "the import is prov#XXXX#ed by the form" }
+					: part.type === "thinking"
+						? { ...part, thinking: "the prov#XXXX#ed data" }
+						: part.type === "toolCall"
+							? { ...part, arguments: { path: "#XXXX#" } }
+							: part,
+			),
+		};
+		const result = toolResult("call-1", "file body");
+
+		const plan = planTurn([user("fix import"), rewritten, result], ledgerFor(seen, "call-1"));
+
+		expect(plan).toEqual({ kind: "resume", toolResult: result, input: [] });
+		const otherCall = assistant("the import is provided by the form", ["call-2"]);
+		expect(transcriptDigest([user("fix import"), otherCall])).not.toBe(transcriptDigest(seen));
 	});
 
 	it("ignores presentation metadata and object key insertion order", () => {

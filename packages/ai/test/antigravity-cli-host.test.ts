@@ -497,25 +497,6 @@ describe("AgyHost stateful steps", () => {
 		expect((await state.output).isError).toBe(true);
 	});
 
-	it("cancels and reseeds an edited assistant prefix instead of silently reusing history", async () => {
-		const state = await parked();
-		const edited = {
-			...state.first.writer.output,
-			content: state.first.writer.output.content.map(block =>
-				block.type === "text" ? { ...block, text: "Edited text" } : block,
-			),
-		};
-		const next = step(state.host, [state.messages[0]!, edited, result(edited)]);
-		await state.fake.cancellations.next();
-		const prompt = await state.fake.prompts.next();
-		expect((await state.output).isError).toBe(true);
-		expect(state.fake.created).toHaveLength(2);
-		expect(textOf(prompt.request.prompt)).toContain("Edited text");
-		state.fake.text("Edited history received.");
-		prompt.response.resolve({ stopReason: "end_turn" });
-		await next.done;
-	});
-
 	it("restarts on tool-set changes and carries the actual result and historical images into the reseed", async () => {
 		const state = await parked();
 		const image = { type: "image" as const, data: "aW1hZ2U=", mimeType: "image/png" };
