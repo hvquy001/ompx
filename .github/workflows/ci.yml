@@ -570,7 +570,7 @@ jobs:
          fail-fast: false
          matrix:
             include:
-               - { os: macos-14, platform: darwin, arch: arm64 }
+               - { os: macos-15, platform: darwin, arch: arm64 }
       # Reusing a trusted artifact only downloads and re-uploads it; do that on
       # a Linux runner instead of waiting for a macOS machine.
       runs-on: ${{ needs.native_artifact_lookup.outputs.darwin-arm64-run-id != '' && 'ubuntu-22.04' || matrix.os }}
@@ -956,7 +956,7 @@ jobs:
                     native_artifact_pattern: pi-natives-linux-musl-x64-*,
                  }
                - {
-                    os: macos-14,
+                    os: macos-15,
                     platform: darwin,
                     arch: arm64,
                     target_id: darwin-arm64,

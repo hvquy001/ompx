@@ -1109,7 +1109,7 @@ printf '%s\\n' "$*" >> "$OMPX_CODEGRAPH_LOG"
 			await writeExecutable(
 				path.join(root, "bin", "bun"),
 				`#!/bin/sh
-if [ "$1" = "--version" ]; then printf '1.3.14\\n'; fi
+if [ "$1" = "--version" ]; then printf '1.4.4\\n'; fi
 `,
 			);
 			const result = await runShellInstaller(root, installDir, ["--source"], {
@@ -1141,7 +1141,7 @@ if [ "$1" = "--version" ]; then printf '1.3.14\\n'; fi
 				await writeExecutable(
 					path.join(root, "bin", "bun"),
 					`#!/bin/sh
-if [ "$1" = "--version" ]; then printf '1.3.14\\n'; fi
+if [ "$1" = "--version" ]; then printf '1.4.4\\n'; fi
 `,
 				);
 				const result = await runShellInstaller(root, installDir, ["--source"], {

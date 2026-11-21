@@ -299,7 +299,9 @@ describe("AgyHost stateful steps", () => {
 		const run = step(state.host, [user("hello")]);
 		const fake = await state.started.next();
 		await fake.prompts.next();
-		fake.text("\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 2h10m18s.\n");
+		fake.text(
+			"\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 2h10m18s.\n",
+		);
 		const error = await run.done.then(
 			() => undefined,
 			(err: unknown) => err,

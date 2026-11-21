@@ -77,3 +77,103 @@ reason = "zbus_names/zvariant 4.3.4/5.15.0 are transitive D-Bus crates; the advi
 id = "RUSTSEC-2026-0372"
 ignoreUntil = 2026-12-31
 reason = "zbus_names/zvariant 4.3.4/5.15.0 are transitive D-Bus crates; the advisory lists no fixed version. Revisit when zbus publishes a fix."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0444"
+ignoreUntil = 2026-12-31
+reason = "astral-tl 0.8.0 is transitive via html-to-markdown-rs (pi-natives); unmaintained-only advisory with no fixed version. Revisit when html-to-markdown-rs drops it."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+ignoreUntil = 2026-12-31
+reason = "chrono 0.4.45 is unmaintained-only with no fixed version; pulled by jj-lib (pi-vcs) and others. Revisit when the ecosystem moves off chrono."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0441"
+ignoreUntil = 2026-12-31
+reason = "pin-utils 0.1.0 is unmaintained-only with no fixed version; transitive via nix 0.26 under webrtc-util (pi-voice). Revisit when webrtc bumps nix."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0387"
+ignoreUntil = 2026-12-31
+reason = "crypto-bigint 0.5.5 is transitive via elliptic-curve 0.13 (p256 -> dtls -> webrtc, pi-voice), pinned ^0.5; the fix is 0.7.x, which elliptic-curve 0.13 does not allow. Revisit when webrtc moves to elliptic-curve 0.14."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0574"
+ignoreUntil = 2026-12-31
+reason = "heapless 0.8.0 is transitive via faster-hex -> gix-hash (jj-lib, pi-vcs), pinned ^0.8; the fix is 0.9.x and the affected APIs are not used by faster-hex. Revisit when faster-hex bumps heapless."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0575"
+ignoreUntil = 2026-12-31
+reason = "heapless 0.8.0 is transitive via faster-hex -> gix-hash (jj-lib, pi-vcs), pinned ^0.8; the fix is 0.9.x and the affected APIs are not used by faster-hex. Revisit when faster-hex bumps heapless."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0576"
+ignoreUntil = 2026-12-31
+reason = "heapless 0.8.0 is transitive via faster-hex -> gix-hash (jj-lib, pi-vcs), pinned ^0.8; the fix is 0.9.x and the affected APIs are not used by faster-hex. Revisit when faster-hex bumps heapless."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0577"
+ignoreUntil = 2026-12-31
+reason = "heapless 0.8.0 is transitive via faster-hex -> gix-hash (jj-lib, pi-vcs), pinned ^0.8; the fix is 0.9.x and the affected APIs are not used by faster-hex. Revisit when faster-hex bumps heapless."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0578"
+ignoreUntil = 2026-12-31
+reason = "heapless 0.8.0 is transitive via faster-hex -> gix-hash (jj-lib, pi-vcs), pinned ^0.8; the fix is 0.9.x and the affected APIs are not used by faster-hex. Revisit when faster-hex bumps heapless."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0579"
+ignoreUntil = 2026-12-31
+reason = "heapless 0.8.0 is transitive via faster-hex -> gix-hash (jj-lib, pi-vcs), pinned ^0.8; the fix is 0.9.x and the affected APIs are not used by faster-hex. Revisit when faster-hex bumps heapless."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0580"
+ignoreUntil = 2026-12-31
+reason = "heapless 0.8.0 is transitive via faster-hex -> gix-hash (jj-lib, pi-vcs), pinned ^0.8; the fix is 0.9.x and the affected APIs are not used by faster-hex. Revisit when faster-hex bumps heapless."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0581"
+ignoreUntil = 2026-12-31
+reason = "heapless 0.8.0 is transitive via faster-hex -> gix-hash (jj-lib, pi-vcs), pinned ^0.8; the fix is 0.9.x and the affected APIs are not used by faster-hex. Revisit when faster-hex bumps heapless."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0582"
+ignoreUntil = 2026-12-31
+reason = "heapless 0.8.0 is transitive via faster-hex -> gix-hash (jj-lib, pi-vcs), pinned ^0.8; the fix is 0.9.x and the affected APIs are not used by faster-hex. Revisit when faster-hex bumps heapless."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0429"
+ignoreUntil = 2026-12-31
+reason = "zip 7.4.0 is transitive via candle-core (pi-predict), pinned ^7; it only opens local model weight archives we ship or the user chose, never untrusted uploads. Fix needs zip 9.x, which candle-core does not allow yet. Revisit when candle bumps zip."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0545"
+ignoreUntil = 2026-12-31
+reason = "zip 7.4.0 is transitive via candle-core (pi-predict), pinned ^7; it only opens local model weight archives we ship or the user chose, never untrusted uploads. Fix needs zip 9.x, which candle-core does not allow yet. Revisit when candle bumps zip."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0546"
+ignoreUntil = 2026-12-31
+reason = "zip 7.4.0 is transitive via candle-core (pi-predict), pinned ^7; it only opens local model weight archives we ship or the user chose, never untrusted uploads. Fix needs zip 9.x, which candle-core does not allow yet. Revisit when candle bumps zip."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0547"
+ignoreUntil = 2026-12-31
+reason = "zip 7.4.0 is transitive via candle-core (pi-predict), pinned ^7; it only opens local model weight archives we ship or the user chose, never untrusted uploads. Fix needs zip 9.x, which candle-core does not allow yet. Revisit when candle bumps zip."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0548"
+ignoreUntil = 2026-12-31
+reason = "zip 7.4.0 is transitive via candle-core (pi-predict), pinned ^7; it only opens local model weight archives we ship or the user chose, never untrusted uploads. Fix needs zip 9.x, which candle-core does not allow yet. Revisit when candle bumps zip."
+
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2026-12-31
+reason = "minimatch 10.2.6 is transitive via @ts-morph/common (ts-morph, dev tooling), pinned ^10; fix is 11.x. Patterns come from our own build scripts, never untrusted input. Revisit when ts-morph bumps minimatch."
+
+[[IgnoredVulns]]
+id = "GHSA-mrhx-c7xc-m3w5"
+ignoreUntil = 2026-12-31
+reason = "zod 3.25.76 is a nested copy under chromium-bidi (puppeteer), pinned ^3; it only validates Chrome's own BiDi protocol messages. Fix is zod 4.x. Revisit when chromium-bidi moves to zod 4."
