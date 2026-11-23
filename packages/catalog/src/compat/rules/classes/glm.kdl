@@ -65,7 +65,7 @@ class "glm" {
 	// GLM Coding Plan: the selectable 1M-context served ids; pin them so
 	// endpoint discovery or older bundled fallbacks cannot regress to 200k.
 	on "zai" "zhipu-coding-plan" {
-		models "glm-5.2" "glm-5.3" "glm-5.3-flash" "glm-5.3-flashx" {
+		models "glm-5.2" "glm-5.3" "glm-5.3-flash" "glm-5.3-flashx" "glm-5.4" {
 			limits-patch {
 				context-window 1000000
 				max-tokens 131072
@@ -109,7 +109,7 @@ class "glm" {
 	// and documents the same low/high/max values (docs.mistral.ai/inference/conversations/reasoning).
 	models "*glm-5.3" "*glm-5.3-air" "*glm-5.3-turbo" "*glm-5.3-flash" "*glm-5.3-flashx" "*glm-5.3:*" \
 		"*glm-5.3-flash-uncensored" "*glm-5.3-free" "*glm-5.3-highspeed" "*glm-5.3-fast" "*glm-5.3-flash-lab" \
-		"*glm-5-3" "*glm-5-3-flash" priority=10 {
+		"*glm-5-3" "*glm-5-3-flash" "*glm-5.4" priority=10 {
 		thinking-default-level "max"
 		thinking-efforts "low" "high" "max"
 		thinking-requires-effort #true
